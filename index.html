@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Recipe Calculator — Servings & Macros</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🍳</text></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="app-header">
+  <div class="header-inner">
+    <h1>🍳 Recipe Calculator</h1>
+    <p>Scale any recipe to the serving size you need and see calories, macros, and nutrients update instantly.</p>
+  </div>
+</header>
+
+<main class="app-main">
+  <section class="toolbar">
+    <input type="search" id="search-input" placeholder="Search recipes…" aria-label="Search recipes">
+    <div class="toolbar-actions">
+      <button id="add-ingredient-btn" class="btn btn-secondary">+ Add Ingredient to Database</button>
+      <button id="add-recipe-btn" class="btn btn-primary">+ Add Custom Recipe</button>
+    </div>
+  </section>
+
+  <section id="recipe-grid" class="recipe-grid" aria-label="Recipe list"></section>
+
+  <section id="recipe-detail" class="recipe-detail hidden">
+    <div class="detail-header">
+      <div>
+        <h2 id="detail-title"></h2>
+        <p id="detail-desc" class="detail-desc"></p>
+      </div>
+      <button id="delete-recipe-btn" class="btn btn-danger hidden">Delete Recipe</button>
+    </div>
+
+    <div class="servings-control">
+      <label for="servings-input">Servings</label>
+      <div class="stepper">
+        <button id="servings-minus" type="button" aria-label="Decrease servings">−</button>
+        <input type="number" id="servings-input" min="0.25" step="0.25">
+        <button id="servings-plus" type="button" aria-label="Increase servings">+</button>
+      </div>
+      <span id="base-servings-note" class="base-note"></span>
+    </div>
+
+    <div class="detail-grid">
+      <div class="detail-col">
+        <h3>Ingredients</h3>
+        <ul id="ingredient-list" class="ingredient-list"></ul>
+
+        <h3>Instructions</h3>
+        <ol id="instruction-list" class="instruction-list"></ol>
+      </div>
+
+      <div class="detail-col">
+        <div class="nutrition-toggle">
+          <label><input type="radio" name="nutrition-mode" value="perServing" checked> Per Serving</label>
+          <label><input type="radio" name="nutrition-mode" value="total"> Whole Batch</label>
+        </div>
+        <div id="nutrition-facts" class="nutrition-facts"></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- Add Recipe Modal -->
+<div id="recipe-modal" class="modal hidden">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>Add Custom Recipe</h2>
+      <button id="close-recipe-modal" class="icon-btn" aria-label="Close">✕</button>
+    </div>
+    <form id="recipe-form">
+      <label>Recipe name
+        <input type="text" id="recipe-name-input" required>
+      </label>
+      <div class="form-row">
+        <label>Base servings (as written)
+          <input type="number" id="recipe-servings-input" min="0.25" step="0.25" required>
+        </label>
+        <label>Serving label
+          <input type="text" id="recipe-serving-label-input" placeholder="e.g. servings, cookies">
+        </label>
+      </div>
+
+      <h3>Ingredients</h3>
+      <datalist id="ingredient-options"></datalist>
+      <div id="ingredient-rows" class="ingredient-rows"></div>
+      <button type="button" id="add-ingredient-row-btn" class="btn btn-secondary btn-small">+ Add Ingredient Row</button>
+      <p class="hint">Type an ingredient name that matches one in the database (autocomplete will help). Need something new? Use "Add Ingredient to Database" first.</p>
+
+      <label>Instructions (one step per line)
+        <textarea id="recipe-instructions-input" rows="5"></textarea>
+      </label>
+
+      <div class="modal-actions">
+        <button type="button" id="cancel-recipe-btn" class="btn btn-secondary">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save Recipe</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- Add Ingredient Modal -->
+<div id="ingredient-modal" class="modal hidden">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>Add Ingredient to Database</h2>
+      <button id="close-ingredient-modal" class="icon-btn" aria-label="Close">✕</button>
+    </div>
+    <form id="ingredient-form">
+      <label>Ingredient name
+        <input type="text" id="new-ing-name" required>
+      </label>
+
+      <h3>Nutrition per 100g</h3>
+      <div class="form-grid">
+        <label>Calories (kcal)<input type="number" id="new-ing-calories" step="any" min="0" value="0"></label>
+        <label>Protein (g)<input type="number" id="new-ing-protein" step="any" min="0" value="0"></label>
+        <label>Carbs (g)<input type="number" id="new-ing-carbs" step="any" min="0" value="0"></label>
+        <label>Fat (g)<input type="number" id="new-ing-fat" step="any" min="0" value="0"></label>
+        <label>Fiber (g)<input type="number" id="new-ing-fiber" step="any" min="0" value="0"></label>
+        <label>Sugar (g)<input type="number" id="new-ing-sugar" step="any" min="0" value="0"></label>
+        <label>Sodium (mg)<input type="number" id="new-ing-sodium" step="any" min="0" value="0"></label>
+      </div>
+
+      <h3>Optional: grams per measure</h3>
+      <p class="hint">Fill these in so the ingredient can be used with cup/tbsp/tsp/each measurements in recipes.</p>
+      <div class="form-grid">
+        <label>1 cup = ? g<input type="number" id="new-ing-unit-cup" step="any" min="0"></label>
+        <label>1 tbsp = ? g<input type="number" id="new-ing-unit-tbsp" step="any" min="0"></label>
+        <label>1 tsp = ? g<input type="number" id="new-ing-unit-tsp" step="any" min="0"></label>
+        <label>1 each = ? g<input type="number" id="new-ing-unit-each" step="any" min="0"></label>
+      </div>
+
+      <div class="modal-actions">
+        <button type="button" id="cancel-ingredient-btn" class="btn btn-secondary">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save Ingredient</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
