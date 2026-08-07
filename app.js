@@ -109,6 +109,8 @@ function pluralizeUnit(unit, qty) {
   const noPlural = new Set(["g", "kg", "oz", "lb", "ml", "l"]);
   if (noPlural.has(unit)) return unit;
   if (qty === 1) return unit;
+  const irregular = { pinch: "pinches", dash: "dashes", leaf: "leaves", inch: "inches", loaf: "loaves" };
+  if (irregular[unit]) return irregular[unit];
   return unit + "s";
 }
 
@@ -125,12 +127,19 @@ function renderRecipeGrid() {
     card.innerHTML = `
       <span class="recipe-emoji">${recipe.emoji || "🍽️"}</span>
       <span class="recipe-name">${escapeHtml(recipe.name)}${recipe.custom ? ' <span class="badge">custom</span>' : ""}</span>
-      <span class="recipe-desc">${escapeHtml(recipe.description || "")}</span>
+      <span class="recipe-desc">${escapeHtml(truncate(recipe.description || "", 110))}</span>
       <span class="recipe-meta">${recipe.baseServings} ${escapeHtml(recipe.servingLabel || "servings")} · ~${Math.round(baseCals)} kcal/serving</span>
     `;
     card.addEventListener("click", () => selectRecipe(recipe.id));
     grid.appendChild(card);
   });
+}
+
+function truncate(str, maxLen) {
+  if (str.length <= maxLen) return str;
+  const cut = str.slice(0, maxLen);
+  const lastSpace = cut.lastIndexOf(" ");
+  return (lastSpace > 0 ? cut.slice(0, lastSpace) : cut).trim() + "…";
 }
 
 function escapeHtml(str) {

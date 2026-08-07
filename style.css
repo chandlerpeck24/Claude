@@ -187,7 +187,14 @@ a { color: var(--accent-strong); }
   font-size: 1.12rem;
   text-wrap: balance;
 }
-.recipe-desc { color: var(--ink-soft); font-size: 0.86rem; }
+.recipe-desc {
+  color: var(--ink-soft);
+  font-size: 0.86rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 .recipe-meta {
   color: var(--accent-strong);
   font-size: 0.78rem;
