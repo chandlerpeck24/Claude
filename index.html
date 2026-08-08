@@ -20,12 +20,15 @@
   <section class="toolbar">
     <input type="search" id="search-input" placeholder="Search recipes…" aria-label="Search recipes">
     <div class="toolbar-actions">
+      <button id="expand-all-btn" class="btn btn-secondary btn-small">Expand all</button>
+      <button id="collapse-all-btn" class="btn btn-secondary btn-small">Collapse all</button>
       <button id="add-ingredient-btn" class="btn btn-secondary">+ Add Ingredient to Database</button>
       <button id="add-recipe-btn" class="btn btn-primary">+ Add Custom Recipe</button>
     </div>
   </section>
 
-  <section id="recipe-grid" class="recipe-grid" aria-label="Recipe list"></section>
+  <div id="recipe-categories" class="recipe-categories" aria-label="Recipe categories"></div>
+  <p id="no-results" class="no-results hidden">No recipes match your search.</p>
 
   <section id="recipe-detail" class="recipe-detail hidden">
     <div class="detail-header">
@@ -85,6 +88,10 @@
           <input type="text" id="recipe-serving-label-input" placeholder="e.g. servings, cookies">
         </label>
       </div>
+      <label>Category
+        <input type="text" id="recipe-category-input" list="category-options" placeholder="e.g. Breakfast, Desserts & Sweets">
+      </label>
+      <datalist id="category-options"></datalist>
 
       <h3>Ingredients</h3>
       <datalist id="ingredient-options"></datalist>

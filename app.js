@@ -13,6 +13,13 @@ const NUTRIENT_UNITS = {
 
 const STORAGE_KEYS = { recipes: "rc_custom_recipes", ingredients: "rc_custom_ingredients" };
 
+const CATEGORY_ORDER = [
+  "Breakfast", "Shots & Smoothies", "Food Synergy Meals", "Weight Loss", "Muscle Gain",
+  "Weight Gain", "Pasta & Italian", "Seafood", "Red Meat & Poultry", "Desserts & Sweets",
+  "Snacks & Dips", "Biblical Meals"
+];
+const DEFAULT_CATEGORY = "My Recipes";
+
 // ---- State ---------------------------------------------------------------
 
 let ingredientDB = [];   // merged default + custom
@@ -114,25 +121,82 @@ function pluralizeUnit(unit, qty) {
   return unit + "s";
 }
 
-// ---- Rendering: Recipe grid -----------------------------------------------
+// ---- Rendering: Recipe categories ------------------------------------------
+
+function groupRecipesByCategory() {
+  const groups = new Map();
+  recipeDB.forEach(recipe => {
+    const cat = recipe.category || DEFAULT_CATEGORY;
+    if (!groups.has(cat)) groups.set(cat, []);
+    groups.get(cat).push(recipe);
+  });
+  const orderedNames = [
+    ...CATEGORY_ORDER.filter(c => groups.has(c)),
+    ...[...groups.keys()].filter(c => !CATEGORY_ORDER.includes(c)).sort()
+  ];
+  return orderedNames.map(name => ({ name, recipes: groups.get(name) }));
+}
+
+function buildRecipeCard(recipe) {
+  const card = document.createElement("button");
+  card.className = "recipe-card";
+  card.setAttribute("data-id", recipe.id);
+  const baseCals = computeRecipeTotals(recipe, recipe.baseServings).calories / recipe.baseServings;
+  card.innerHTML = `
+    <span class="recipe-emoji">${recipe.emoji || "🍽️"}</span>
+    <span class="recipe-name">${escapeHtml(recipe.name)}${recipe.custom ? ' <span class="badge">custom</span>' : ""}</span>
+    <span class="recipe-desc">${escapeHtml(truncate(recipe.description || "", 110))}</span>
+    <span class="recipe-meta">${recipe.baseServings} ${escapeHtml(recipe.servingLabel || "servings")} · ~${Math.round(baseCals)} kcal/serving</span>
+  `;
+  card.addEventListener("click", () => selectRecipe(recipe.id));
+  return card;
+}
 
 function renderRecipeGrid() {
-  const grid = document.getElementById("recipe-grid");
-  grid.innerHTML = "";
-  recipeDB.forEach(recipe => {
-    const card = document.createElement("button");
-    card.className = "recipe-card";
-    card.setAttribute("data-id", recipe.id);
-    const baseCals = computeRecipeTotals(recipe, recipe.baseServings).calories / recipe.baseServings;
-    card.innerHTML = `
-      <span class="recipe-emoji">${recipe.emoji || "🍽️"}</span>
-      <span class="recipe-name">${escapeHtml(recipe.name)}${recipe.custom ? ' <span class="badge">custom</span>' : ""}</span>
-      <span class="recipe-desc">${escapeHtml(truncate(recipe.description || "", 110))}</span>
-      <span class="recipe-meta">${recipe.baseServings} ${escapeHtml(recipe.servingLabel || "servings")} · ~${Math.round(baseCals)} kcal/serving</span>
-    `;
-    card.addEventListener("click", () => selectRecipe(recipe.id));
-    grid.appendChild(card);
+  const container = document.getElementById("recipe-categories");
+  container.innerHTML = "";
+  const groups = groupRecipesByCategory();
+  groups.forEach(({ name, recipes }) => {
+    const details = document.createElement("details");
+    details.className = "category-group";
+    details.setAttribute("data-category", name);
+
+    const summary = document.createElement("summary");
+    summary.innerHTML = `<span class="category-name">${escapeHtml(name)}</span><span class="category-count">${recipes.length}</span>`;
+    details.appendChild(summary);
+
+    const grid = document.createElement("div");
+    grid.className = "recipe-grid";
+    recipes.forEach(recipe => grid.appendChild(buildRecipeCard(recipe)));
+    details.appendChild(grid);
+
+    container.appendChild(details);
   });
+  applySearchFilter(document.getElementById("search-input").value);
+}
+
+function applySearchFilter(query) {
+  const q = query.trim().toLowerCase();
+  const groups = document.querySelectorAll(".category-group");
+  let anyVisibleOverall = false;
+  groups.forEach(group => {
+    const cards = group.querySelectorAll(".recipe-card");
+    let anyVisible = false;
+    cards.forEach(card => {
+      const name = card.querySelector(".recipe-name").textContent.toLowerCase();
+      const match = !q || name.includes(q);
+      card.style.display = match ? "" : "none";
+      if (match) anyVisible = true;
+    });
+    group.style.display = anyVisible ? "" : "none";
+    group.open = q ? anyVisible : false;
+    if (anyVisible) anyVisibleOverall = true;
+  });
+  document.getElementById("no-results").classList.toggle("hidden", !q || anyVisibleOverall);
+}
+
+function expandAllCategories(open) {
+  document.querySelectorAll(".category-group").forEach(g => { g.open = open; });
 }
 
 function truncate(str, maxLen) {
@@ -273,6 +337,13 @@ function openRecipeModal() {
   ingredientRowCount = 0;
   addIngredientRow();
   refreshIngredientDatalist();
+  refreshCategoryDatalist();
+}
+
+function refreshCategoryDatalist() {
+  const dl = document.getElementById("category-options");
+  const names = groupRecipesByCategory().map(g => g.name);
+  dl.innerHTML = names.map(n => `<option value="${escapeHtml(n)}">`).join("");
 }
 function closeRecipeModal() {
   document.getElementById("recipe-modal").classList.add("hidden");
@@ -311,6 +382,7 @@ function handleSaveRecipe(e) {
   const name = document.getElementById("recipe-name-input").value.trim();
   const baseServings = Number(document.getElementById("recipe-servings-input").value);
   const servingLabel = document.getElementById("recipe-serving-label-input").value.trim() || "servings";
+  const category = document.getElementById("recipe-category-input").value.trim() || DEFAULT_CATEGORY;
   const instructionsRaw = document.getElementById("recipe-instructions-input").value.trim();
   const instructions = instructionsRaw ? instructionsRaw.split("\n").map(s => s.trim()).filter(Boolean) : [];
 
@@ -347,7 +419,7 @@ function handleSaveRecipe(e) {
   }
 
   const id = "custom_" + name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") + "_" + Date.now();
-  const recipe = { id, name, baseServings, servingLabel, ingredients, instructions, emoji: "📝",
+  const recipe = { id, name, baseServings, servingLabel, category, ingredients, instructions, emoji: "📝",
     description: "Your custom recipe" };
 
   const custom = loadCustomRecipes();
@@ -439,13 +511,9 @@ function init() {
   document.getElementById("cancel-ingredient-btn").addEventListener("click", closeIngredientModal);
   document.getElementById("ingredient-form").addEventListener("submit", handleSaveIngredient);
 
-  document.getElementById("search-input").addEventListener("input", e => {
-    const q = e.target.value.toLowerCase();
-    document.querySelectorAll(".recipe-card").forEach(card => {
-      const name = card.querySelector(".recipe-name").textContent.toLowerCase();
-      card.style.display = name.includes(q) ? "" : "none";
-    });
-  });
+  document.getElementById("search-input").addEventListener("input", e => applySearchFilter(e.target.value));
+  document.getElementById("expand-all-btn").addEventListener("click", () => expandAllCategories(true));
+  document.getElementById("collapse-all-btn").addEventListener("click", () => expandAllCategories(false));
 }
 
 document.addEventListener("DOMContentLoaded", init);

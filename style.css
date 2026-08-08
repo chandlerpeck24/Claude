@@ -153,13 +153,69 @@ a { color: var(--accent-strong); }
 .btn-danger:hover { background: var(--danger); color: var(--surface-raised); }
 .btn-small { padding: 0.4rem 0.75rem; font-size: 0.82rem; }
 
+/* ---- Recipe categories (collapsible groups) ---- */
+
+.recipe-categories { display: flex; flex-direction: column; gap: 0.75rem; margin-bottom: 1.5rem; }
+
+.category-group {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.category-group > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.9rem 1.1rem;
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.1rem;
+  color: var(--ink);
+  user-select: none;
+}
+.category-group > summary::-webkit-details-marker { display: none; }
+.category-group > summary::before {
+  content: "▸";
+  display: inline-block;
+  color: var(--accent);
+  font-size: 0.8rem;
+  transition: transform 0.15s ease;
+  flex: 0 0 auto;
+}
+.category-group[open] > summary::before { transform: rotate(90deg); }
+.category-group > summary:hover { background: var(--accent-wash); }
+.category-group[open] > summary { border-bottom: 1px solid var(--line); }
+
+.category-name { flex: 1 1 auto; }
+.category-count {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--ink-soft);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.1rem 0.55rem;
+}
+
+.no-results {
+  text-align: center;
+  color: var(--ink-soft);
+  padding: 2rem 0;
+}
+
 /* ---- Recipe grid (index cards) ---- */
 
 .recipe-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
   gap: 1rem;
-  margin-bottom: 2rem;
+  padding: 1.1rem;
 }
 
 .recipe-card {
