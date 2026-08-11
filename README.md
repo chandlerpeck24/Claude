@@ -1,9 +1,8 @@
-# Recipe Calculator
+# Wayfarer — Travel Journal
 
-A browser-based calculator for cookbook recipes. Pick a recipe, set the
-number of servings you want to make, and every ingredient amount plus the
-full nutrition breakdown (calories, macros, and key nutrients) updates
-instantly — per serving or for the whole batch.
+A browser-based travel journal for trips past and future: log blog/short-story
+style entries with photos and tags, keep planning notes and checklists for
+trips you haven't taken yet, and browse everything on one timeline.
 
 ## Running it
 
@@ -18,37 +17,44 @@ then visit `http://localhost:8000`.
 
 ## Features
 
-- **Serving-size scaling** — enter any serving count (supports fractional
-  servings) and every ingredient quantity scales proportionally, displayed
-  as friendly fractions (e.g. "1 1/2 cups").
-- **Live nutrition facts** — calories, protein, carbs, fat, fiber, sugar,
-  and sodium, shown per serving or for the whole batch.
-- **6 built-in recipes** spanning baking, breakfast, dinner, and snacks,
-  each backed by real ingredient-level nutrition data.
-- **~45-ingredient nutrition database** with per-100g nutrition and
-  kitchen-measure conversions (cup/tbsp/tsp/each/clove/stick) so amounts
-  in any common unit convert correctly.
-- **Add your own recipes** — build a recipe from ingredients already in the
-  database via the "+ Add Custom Recipe" form.
-- **Add your own ingredients** — for anything not in the database, add it
-  with its own per-100g nutrition and measure conversions via
-  "+ Add Ingredient to Database".
-- Custom recipes/ingredients persist in the browser (`localStorage`), so
-  they're still there next time you load the page.
+- **Trips, past and future** — every trip gets a name, destination, date
+  range, cover photo, and summary. The home page automatically groups them
+  into Currently Traveling, Upcoming, and Past sections, each with a
+  human-friendly countdown ("In 3 months", "Day 7 of 16", "8 months ago").
+- **Two kinds of entries per trip** — **Journal entries** for blog/short-story
+  style writing about what actually happened (title, date, location, prose
+  body, photos, tags), and **Plans & Notes** for future trips: ideas,
+  logistics, and checklists you can check off as you sort them out.
+- **Photos** — attach multiple photos to any entry or a cover photo to any
+  trip. Images are downscaled and compressed client-side before saving, and
+  clicking any photo opens a full-screen lightbox with keyboard navigation.
+- **Insights via tags** — free-form tags (e.g. `favorite`, `mistake-to-avoid`,
+  `tip`, `food`) on every entry, searchable and reused via autocomplete.
+- **Checklists** — plan entries can carry a checklist of prep items with
+  live progress ("3 / 5 done"), toggled with a click.
+- **"Latest from the Road"** — a blog-style teaser feed of your most recent
+  journal entries across every trip, right on the home page.
+- **Search** — one search box filters trips and entries by title, body,
+  location, and tags, everywhere in the app.
+- Everything persists in the browser (`localStorage`) — trips, entries,
+  photos, and checklist state are all still there next time you load the
+  page. Comes seeded with a few example trips so it isn't empty on first
+  run; edit or delete them freely.
 
 ## Files
 
-- `index.html` — page structure and modals
-- `style.css` — styling (light/dark aware)
-- `data.js` — ingredient nutrition database and built-in recipes
-- `app.js` — scaling math, unit conversion, rendering, and custom
-  recipe/ingredient forms
+- `index.html` — page structure, modals, and the lightbox
+- `style.css` — styling (passport/map visual identity, light/dark aware)
+- `data.js` — seed trips and entries shown on first load
+- `app.js` — routing, state, rendering, photo handling, and all CRUD logic
 
-## How the math works
+## How it's put together
 
-Each recipe stores ingredient amounts for its original ("base") serving
-count. Scaling multiplies every ingredient quantity by
-`desiredServings / baseServings`. Each ingredient carries nutrition per
-100g plus gram weights for the units it's used in (e.g. 1 cup of flour =
-120g), so scaled quantities convert to grams and then to
-calories/macros/nutrients, summed across all ingredients.
+Trips and entries are two flat arrays kept in `localStorage`. A trip's status
+(*ongoing* / *upcoming* / *past*) is derived from today's date against its
+start/end dates rather than stored, so it's always up to date. Navigation
+between the home view and a trip's detail view is a tiny hash router
+(`#/` and `#/trip/<id>`), so the back button and reloads both behave. Photos
+are read via `FileReader`, downscaled through an offscreen `<canvas>`, and
+stored as JPEG data URLs directly on the trip/entry objects — no server or
+external storage involved.
