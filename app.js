@@ -1,519 +1,702 @@
 /* =========================================================================
-   Recipe Calculator — App Logic
+   Travel Journal — App Logic
    ========================================================================= */
 
-const NUTRIENT_KEYS = ["calories", "protein", "carbs", "fat", "fiber", "sugar", "sodium"];
-const NUTRIENT_LABELS = {
-  calories: "Calories", protein: "Protein", carbs: "Carbohydrates",
-  fat: "Fat", fiber: "Fiber", sugar: "Sugar", sodium: "Sodium"
-};
-const NUTRIENT_UNITS = {
-  calories: "kcal", protein: "g", carbs: "g", fat: "g", fiber: "g", sugar: "g", sodium: "mg"
+const STORAGE_KEYS = { trips: "tj_trips", entries: "tj_entries" };
+
+const STATUS_LABELS = {
+  idea: "💭 Idea", planning: "🧳 Planning", upcoming: "🔜 Upcoming",
+  ongoing: "✈️ Ongoing", past: "✅ Past"
 };
 
-const STORAGE_KEYS = { recipes: "rc_custom_recipes", ingredients: "rc_custom_ingredients" };
+const EMOJI_SUGGESTIONS = ["📍", "✈️", "🏖️", "🏔️", "🏙️", "🎒", "🚗", "🗺️", "🚂", "🛶"];
 
-const CATEGORY_ORDER = [
-  "Breakfast", "Shots & Smoothies", "Food Synergy Meals", "Weight Loss", "Muscle Gain",
-  "Weight Gain", "Pasta & Italian", "Seafood", "Red Meat & Poultry", "Desserts & Sweets",
-  "Snacks & Dips", "Biblical Meals"
-];
-const DEFAULT_CATEGORY = "My Recipes";
+// ---- State ----------------------------------------------------------------
 
-// ---- State ---------------------------------------------------------------
+let trips = [];
+let entries = [];
+let currentTab = "timeline";
+let currentTripDetailId = null;
+let searchQuery = "";
+let formatFilter = "all";
+let statusFilter = "all";
+let sortNewestFirst = true;
+let expandedEntryIds = new Set();
 
-let ingredientDB = [];   // merged default + custom
-let recipeDB = [];       // merged default + custom
-let currentRecipeId = null;
-let currentServings = null;
-let ingredientRowCount = 0;
+let editingTripId = null;
+let pendingCoverPhoto = null; // dataURL or null; undefined means "unchanged" while editing
+let editingEntryId = null;
+let pendingEntryPhotos = [];
 
-// ---- Bootstrap -------------------------------------------------------------
+let lightboxPhotos = [];
+let lightboxIndex = 0;
 
-function loadCustomRecipes() {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEYS.recipes)) || []; }
+// ---- Storage ----------------------------------------------------------------
+
+function loadTrips() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEYS.trips)) || []; }
   catch (e) { return []; }
 }
-function loadCustomIngredients() {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEYS.ingredients)) || []; }
+function loadEntries() {
+  try { return JSON.parse(localStorage.getItem(STORAGE_KEYS.entries)) || []; }
   catch (e) { return []; }
 }
-function saveCustomRecipes(list) { localStorage.setItem(STORAGE_KEYS.recipes, JSON.stringify(list)); }
-function saveCustomIngredients(list) { localStorage.setItem(STORAGE_KEYS.ingredients, JSON.stringify(list)); }
-
-function rebuildDatabases() {
-  const customIngredients = loadCustomIngredients().map(i => ({ ...i, custom: true }));
-  const customRecipes = loadCustomRecipes().map(r => ({ ...r, custom: true }));
-  ingredientDB = [...INGREDIENTS, ...customIngredients];
-  recipeDB = [...RECIPES, ...customRecipes];
+function saveTrips() {
+  try { localStorage.setItem(STORAGE_KEYS.trips, JSON.stringify(trips)); }
+  catch (e) { alert("Couldn't save — your browser's storage is full. Try exporting a backup and removing some photos."); }
+}
+function saveEntries() {
+  try { localStorage.setItem(STORAGE_KEYS.entries, JSON.stringify(entries)); }
+  catch (e) { alert("Couldn't save — your browser's storage is full. Try exporting a backup and removing some photos."); }
 }
 
-function getIngredient(id) { return ingredientDB.find(i => i.id === id); }
-function getRecipe(id) { return recipeDB.find(r => r.id === id); }
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
 
-// ---- Unit conversion & nutrition math --------------------------------------
+// ---- Utilities: dates -------------------------------------------------------
 
-function gramsPerUnit(ingredient, unit) {
-  if (GLOBAL_UNITS_TO_GRAMS[unit] !== undefined) return GLOBAL_UNITS_TO_GRAMS[unit];
-  if (ingredient.units && ingredient.units[unit] !== undefined) return ingredient.units[unit];
-  return null;
+function parseLocalDate(str) {
+  if (!str) return null;
+  const [y, m, d] = str.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+function startOfToday() {
+  const t = new Date();
+  return new Date(t.getFullYear(), t.getMonth(), t.getDate());
+}
+function formatDate(str) {
+  const d = parseLocalDate(str);
+  if (!d) return "";
+  return d.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+}
+function daysUntil(str) {
+  const d = parseLocalDate(str);
+  if (!d) return null;
+  return Math.round((d - startOfToday()) / 86400000);
 }
 
-function availableUnitsFor(ingredient) {
-  const specific = ingredient.units ? Object.keys(ingredient.units) : [];
-  return [...specific, ...Object.keys(GLOBAL_UNITS_TO_GRAMS)];
-}
-
-function computeIngredientNutrition(ingredient, quantity, unit) {
-  const gpu = gramsPerUnit(ingredient, unit);
-  const grams = gpu === null ? 0 : quantity * gpu;
-  const factor = grams / 100;
-  const result = {};
-  NUTRIENT_KEYS.forEach(k => { result[k] = (ingredient.per100g[k] || 0) * factor; });
-  result._grams = grams;
-  return result;
-}
-
-function emptyNutrition() {
-  const n = {};
-  NUTRIENT_KEYS.forEach(k => n[k] = 0);
-  return n;
-}
-
-function addNutrition(a, b) {
-  const n = {};
-  NUTRIENT_KEYS.forEach(k => n[k] = a[k] + b[k]);
-  return n;
-}
-
-// Convert a decimal to a friendly mixed-number fraction string (eighths).
-function formatQuantity(qty) {
-  if (qty === 0) return "0";
-  const whole = Math.floor(qty);
-  let frac = qty - whole;
-  const denominators = [2, 3, 4, 8];
-  let best = null;
-  for (const d of denominators) {
-    const numerator = Math.round(frac * d);
-    if (numerator === 0 || numerator === d) continue;
-    const g = gcd(numerator, d);
-    const err = Math.abs(frac - numerator / d);
-    if (best === null || err < best.err) best = { num: numerator / g, den: d / g, err };
-  }
-  // Fall back to decimal if fraction approximation is poor or qty is large/precise
-  if (best === null || best.err > 0.02) {
-    const rounded = Math.round(qty * 100) / 100;
-    return trimZero(rounded);
-  }
-  const fracStr = `${best.num}/${best.den}`;
-  return whole > 0 ? `${whole} ${fracStr}` : fracStr;
-}
-function trimZero(n) { return n % 1 === 0 ? String(n) : String(n); }
-function gcd(a, b) { return b === 0 ? a : gcd(b, a % b); }
-
-function pluralizeUnit(unit, qty) {
-  if (unit === "each") return "";
-  const noPlural = new Set(["g", "kg", "oz", "lb", "ml", "l"]);
-  if (noPlural.has(unit)) return unit;
-  if (qty === 1) return unit;
-  const irregular = { pinch: "pinches", dash: "dashes", leaf: "leaves", inch: "inches", loaf: "loaves" };
-  if (irregular[unit]) return irregular[unit];
-  return unit + "s";
-}
-
-// ---- Rendering: Recipe categories ------------------------------------------
-
-function groupRecipesByCategory() {
-  const groups = new Map();
-  recipeDB.forEach(recipe => {
-    const cat = recipe.category || DEFAULT_CATEGORY;
-    if (!groups.has(cat)) groups.set(cat, []);
-    groups.get(cat).push(recipe);
-  });
-  const orderedNames = [
-    ...CATEGORY_ORDER.filter(c => groups.has(c)),
-    ...[...groups.keys()].filter(c => !CATEGORY_ORDER.includes(c)).sort()
-  ];
-  return orderedNames.map(name => ({ name, recipes: groups.get(name) }));
-}
-
-function buildRecipeCard(recipe) {
-  const card = document.createElement("button");
-  card.className = "recipe-card";
-  card.setAttribute("data-id", recipe.id);
-  const baseCals = computeRecipeTotals(recipe, recipe.baseServings).calories / recipe.baseServings;
-  card.innerHTML = `
-    <span class="recipe-emoji">${recipe.emoji || "🍽️"}</span>
-    <span class="recipe-name">${escapeHtml(recipe.name)}${recipe.custom ? ' <span class="badge">custom</span>' : ""}</span>
-    <span class="recipe-desc">${escapeHtml(truncate(recipe.description || "", 110))}</span>
-    <span class="recipe-meta">${recipe.baseServings} ${escapeHtml(recipe.servingLabel || "servings")} · ~${Math.round(baseCals)} kcal/serving</span>
-  `;
-  card.addEventListener("click", () => selectRecipe(recipe.id));
-  return card;
-}
-
-function renderRecipeGrid() {
-  const container = document.getElementById("recipe-categories");
-  container.innerHTML = "";
-  const groups = groupRecipesByCategory();
-  groups.forEach(({ name, recipes }) => {
-    const details = document.createElement("details");
-    details.className = "category-group";
-    details.setAttribute("data-category", name);
-
-    const summary = document.createElement("summary");
-    summary.innerHTML = `<span class="category-name">${escapeHtml(name)}</span><span class="category-count">${recipes.length}</span>`;
-    details.appendChild(summary);
-
-    const grid = document.createElement("div");
-    grid.className = "recipe-grid";
-    recipes.forEach(recipe => grid.appendChild(buildRecipeCard(recipe)));
-    details.appendChild(grid);
-
-    container.appendChild(details);
-  });
-  applySearchFilter(document.getElementById("search-input").value);
-}
-
-function applySearchFilter(query) {
-  const q = query.trim().toLowerCase();
-  const groups = document.querySelectorAll(".category-group");
-  let anyVisibleOverall = false;
-  groups.forEach(group => {
-    const cards = group.querySelectorAll(".recipe-card");
-    let anyVisible = false;
-    cards.forEach(card => {
-      const name = card.querySelector(".recipe-name").textContent.toLowerCase();
-      const match = !q || name.includes(q);
-      card.style.display = match ? "" : "none";
-      if (match) anyVisible = true;
-    });
-    group.style.display = anyVisible ? "" : "none";
-    group.open = q ? anyVisible : false;
-    if (anyVisible) anyVisibleOverall = true;
-  });
-  document.getElementById("no-results").classList.toggle("hidden", !q || anyVisibleOverall);
-}
-
-function expandAllCategories(open) {
-  document.querySelectorAll(".category-group").forEach(g => { g.open = open; });
-}
-
-function truncate(str, maxLen) {
-  if (str.length <= maxLen) return str;
-  const cut = str.slice(0, maxLen);
-  const lastSpace = cut.lastIndexOf(" ");
-  return (lastSpace > 0 ? cut.slice(0, lastSpace) : cut).trim() + "…";
-}
+// ---- Utilities: text --------------------------------------------------------
 
 function escapeHtml(str) {
-  const div = document.createElement("div");
-  div.textContent = str;
-  return div.innerHTML;
+  return String(str ?? "").replace(/[&<>"']/g, ch => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[ch]));
+}
+function parseTags(str) {
+  return (str || "").split(",").map(t => t.trim()).filter(Boolean);
+}
+function renderBodyHtml(text) {
+  const paragraphs = String(text || "").split(/\n\s*\n/).map(p => p.trim()).filter(Boolean);
+  return paragraphs.map(p => `<p>${escapeHtml(p).replace(/\n/g, "<br>")}</p>`).join("");
+}
+function excerptText(text, maxLen) {
+  const flat = String(text || "").replace(/\s+/g, " ").trim();
+  if (flat.length <= maxLen) return null;
+  return flat.slice(0, maxLen).trim() + "…";
+}
+function readingTime(text) {
+  const words = String(text || "").trim().split(/\s+/).filter(Boolean).length;
+  return Math.max(1, Math.round(words / 200));
 }
 
-// ---- Recipe detail & calculator -------------------------------------------
+// ---- Trip helpers ------------------------------------------------------------
 
-function selectRecipe(id) {
-  currentRecipeId = id;
-  const recipe = getRecipe(id);
-  currentServings = recipe.baseServings;
-  document.querySelectorAll(".recipe-card").forEach(c => {
-    c.classList.toggle("active", c.getAttribute("data-id") === id);
-  });
-  renderRecipeDetail();
-  document.getElementById("recipe-detail").scrollIntoView({ behavior: "smooth", block: "nearest" });
+function getTrip(id) { return trips.find(t => t.id === id); }
+
+function computeStatus(trip) {
+  if (trip.startDate) {
+    const today = startOfToday();
+    const start = parseLocalDate(trip.startDate);
+    const end = trip.endDate ? parseLocalDate(trip.endDate) : start;
+    if (end < today) return "past";
+    if (start > today) return "upcoming";
+    return "ongoing";
+  }
+  return trip.status === "planning" ? "planning" : "idea";
 }
 
-function computeRecipeTotals(recipe, servings) {
-  const factor = servings / recipe.baseServings;
-  let total = emptyNutrition();
-  recipe.ingredients.forEach(item => {
-    const ingredient = getIngredient(item.id);
-    if (!ingredient) return;
-    const scaledQty = item.quantity * factor;
-    const n = computeIngredientNutrition(ingredient, scaledQty, item.unit);
-    total = addNutrition(total, n);
-  });
-  return total;
+function tripEntries(tripId) { return entries.filter(e => e.tripId === tripId); }
+
+function allPhotos() {
+  const photos = [];
+  trips.forEach(t => { if (t.coverPhoto) photos.push({ src: t.coverPhoto, caption: t.name, tripId: t.id }); });
+  entries.forEach(e => (e.photos || []).forEach(src => {
+    const trip = e.tripId ? getTrip(e.tripId) : null;
+    photos.push({ src, caption: e.title + (trip ? ` — ${trip.name}` : ""), tripId: e.tripId, entryId: e.id });
+  }));
+  return photos;
 }
 
-function renderRecipeDetail() {
-  const recipe = getRecipe(currentRecipeId);
-  const container = document.getElementById("recipe-detail");
-  if (!recipe) { container.classList.add("hidden"); return; }
-  container.classList.remove("hidden");
+// ---- Image compression -------------------------------------------------------
 
-  const factor = currentServings / recipe.baseServings;
-
-  document.getElementById("detail-title").textContent = `${recipe.emoji || ""} ${recipe.name}`;
-  document.getElementById("detail-desc").textContent = recipe.description || "";
-  document.getElementById("servings-input").value = currentServings;
-  document.getElementById("base-servings-note").textContent =
-    `Original recipe makes ${recipe.baseServings} ${recipe.servingLabel || "servings"}`;
-
-  // Ingredients
-  const list = document.getElementById("ingredient-list");
-  list.innerHTML = "";
-  recipe.ingredients.forEach(item => {
-    const ingredient = getIngredient(item.id);
-    const li = document.createElement("li");
-    if (!ingredient) {
-      li.textContent = `${item.quantity} ${item.unit} (unknown ingredient: ${item.id})`;
-      list.appendChild(li);
-      return;
-    }
-    const scaledQty = item.quantity * factor;
-    const unitLabel = pluralizeUnit(item.unit, scaledQty);
-    li.innerHTML = `<span class="qty">${formatQuantity(scaledQty)}${unitLabel ? " " + unitLabel : ""}</span>
-                     <span class="ing-name">${escapeHtml(ingredient.name)}</span>`;
-    list.appendChild(li);
+function compressImage(file, maxDim = 1280, quality = 0.72) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > maxDim || height > maxDim) {
+          if (width > height) { height = Math.round(height * maxDim / width); width = maxDim; }
+          else { width = Math.round(width * maxDim / height); height = maxDim; }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width; canvas.height = height;
+        canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.onerror = () => reject(new Error("Couldn't read image"));
+      img.src = e.target.result;
+    };
+    reader.onerror = () => reject(new Error("Couldn't read file"));
+    reader.readAsDataURL(file);
   });
-
-  // Instructions
-  const steps = document.getElementById("instruction-list");
-  steps.innerHTML = "";
-  (recipe.instructions || []).forEach(step => {
-    const li = document.createElement("li");
-    li.textContent = step;
-    steps.appendChild(li);
-  });
-
-  // Nutrition
-  renderNutrition(recipe);
-
-  // Delete button only for custom recipes
-  const delBtn = document.getElementById("delete-recipe-btn");
-  delBtn.classList.toggle("hidden", !recipe.custom);
 }
 
-function renderNutrition(recipe) {
-  const total = computeRecipeTotals(recipe, currentServings);
-  const perServing = {};
-  NUTRIENT_KEYS.forEach(k => perServing[k] = total[k] / currentServings);
+// ---- Init -----------------------------------------------------------------
 
-  const mode = document.querySelector('input[name="nutrition-mode"]:checked').value;
-  const data = mode === "total" ? total : perServing;
+document.addEventListener("DOMContentLoaded", () => {
+  trips = loadTrips();
+  entries = loadEntries();
+  bindStaticEvents();
+  renderAll();
+});
 
-  const box = document.getElementById("nutrition-facts");
-  box.innerHTML = `
-    <h3>Nutrition Facts</h3>
-    <div class="nutrition-sub">${mode === "total"
-      ? `Whole batch — ${currentServings} ${recipe.servingLabel || "servings"}`
-      : `Per serving`}</div>
-    <div class="nutrition-calories">
-      <span>Calories</span>
-      <span>${Math.round(data.calories)}</span>
+function renderAll() {
+  renderStats();
+  renderTimeline();
+  renderTrips();
+  renderPhotosView();
+  if (currentTripDetailId) renderTripDetail(currentTripDetailId);
+}
+
+// ---- Stats ------------------------------------------------------------------
+
+function renderStats() {
+  const countries = new Set(trips.map(t => t.destination).filter(Boolean));
+  const visited = trips.filter(t => computeStatus(t) === "past").length;
+  const upcoming = trips.filter(t => ["upcoming", "ongoing"].includes(computeStatus(t))).length;
+  const photoCount = allPhotos().length;
+  const tiles = [
+    ["Trips", trips.length],
+    ["Places", countries.size],
+    ["Visited", visited],
+    ["Upcoming", upcoming],
+    ["Entries", entries.length],
+    ["Photos", photoCount]
+  ];
+  document.getElementById("stats-bar").innerHTML = tiles.map(([label, value]) => `
+    <div class="stat-tile"><div class="stat-value">${value}</div><div class="stat-label">${label}</div></div>
+  `).join("");
+}
+
+// ---- Timeline view ------------------------------------------------------------
+
+function matchesSearch(haystack) {
+  if (!searchQuery) return true;
+  return haystack.toLowerCase().includes(searchQuery.toLowerCase());
+}
+
+function filteredEntries() {
+  return entries.filter(e => {
+    if (formatFilter !== "all" && e.format !== formatFilter) return false;
+    const trip = e.tripId ? getTrip(e.tripId) : null;
+    const haystack = [e.title, e.body, (e.tags || []).join(" "), trip ? trip.name : ""].join(" ");
+    return matchesSearch(haystack);
+  });
+}
+
+function renderUpcomingStrip() {
+  const upcoming = trips
+    .filter(t => computeStatus(t) === "upcoming" && t.startDate)
+    .sort((a, b) => parseLocalDate(a.startDate) - parseLocalDate(b.startDate));
+  const el = document.getElementById("upcoming-strip");
+  el.innerHTML = upcoming.map(t => {
+    const days = daysUntil(t.startDate);
+    return `<div class="upcoming-card" data-trip-id="${t.id}">
+      <div class="upcoming-emoji">${escapeHtml(t.emoji || "📍")}</div>
+      <div class="upcoming-name">${escapeHtml(t.name)}</div>
+      <div class="upcoming-countdown">${days === 0 ? "Today!" : days === 1 ? "Tomorrow" : `In ${days} days`} · ${formatDate(t.startDate)}</div>
+    </div>`;
+  }).join("");
+  el.querySelectorAll(".upcoming-card").forEach(card => {
+    card.addEventListener("click", () => openTripDetail(card.dataset.tripId));
+  });
+}
+
+function entryCardHtml(entry, opts = {}) {
+  const trip = entry.tripId ? getTrip(entry.tripId) : null;
+  const expanded = expandedEntryIds.has(entry.id);
+  const excerpt = entry.format === "story" ? excerptText(entry.body, 280) : null;
+  const photos = entry.photos || [];
+  return `
+  <article class="entry-card format-${entry.format}" data-entry-id="${entry.id}">
+    <div class="entry-meta">
+      ${!opts.hideTrip && trip ? `<span class="entry-trip-badge" data-trip-id="${trip.id}">${escapeHtml(trip.emoji || "📍")} ${escapeHtml(trip.name)}</span>` : ""}
+      ${!opts.hideTrip && !trip ? `<span class="entry-trip-badge">General</span>` : ""}
+      <span class="entry-format-badge">${entry.format === "story" ? "📖 Story" : "📝 Note"}</span>
+      <span>${formatDate(entry.date)}</span>
+      ${entry.format === "story" ? `<span>· ${readingTime(entry.body)} min read</span>` : ""}
     </div>
-    <div class="nutrition-divider"></div>
-    ${NUTRIENT_KEYS.filter(k => k !== "calories").map(k => `
-      <div class="nutrition-row">
-        <span>${NUTRIENT_LABELS[k]}</span>
-        <span>${formatNutrientValue(data[k])} ${NUTRIENT_UNITS[k]}</span>
+    <h3 class="entry-title">${escapeHtml(entry.title)}</h3>
+    <div class="entry-body ${excerpt && !expanded ? "collapsed" : ""}">${renderBodyHtml(entry.body)}</div>
+    ${photos.length ? `<div class="entry-photos">${photos.map((src, i) => `<img src="${src}" data-entry-id="${entry.id}" data-photo-index="${i}" alt="">`).join("")}</div>` : ""}
+    ${(entry.tags || []).length ? `<div class="entry-tags">${entry.tags.map(t => `<span class="tag-chip">#${escapeHtml(t)}</span>`).join("")}</div>` : ""}
+    <div class="entry-actions">
+      ${excerpt ? `<button type="button" class="read-more-btn" data-entry-id="${entry.id}">${expanded ? "Show less" : "Read more"}</button>` : ""}
+      <span class="spacer"></span>
+      <button type="button" class="btn btn-secondary btn-small edit-entry-btn" data-entry-id="${entry.id}">Edit</button>
+    </div>
+  </article>`;
+}
+
+function renderTimeline() {
+  renderUpcomingStrip();
+  let list = filteredEntries().slice().sort((a, b) => {
+    const diff = parseLocalDate(a.date) - parseLocalDate(b.date);
+    return sortNewestFirst ? -diff : diff;
+  });
+  const feed = document.getElementById("timeline-feed");
+  feed.innerHTML = list.map(e => entryCardHtml(e)).join("");
+  document.getElementById("timeline-empty").classList.toggle("hidden", entries.length !== 0);
+  bindEntryCardEvents(feed);
+}
+
+function bindEntryCardEvents(container) {
+  container.querySelectorAll(".read-more-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const id = btn.dataset.entryId;
+      if (expandedEntryIds.has(id)) expandedEntryIds.delete(id); else expandedEntryIds.add(id);
+      renderAll();
+    });
+  });
+  container.querySelectorAll(".edit-entry-btn").forEach(btn => {
+    btn.addEventListener("click", () => openEntryModal(btn.dataset.entryId));
+  });
+  container.querySelectorAll(".entry-trip-badge[data-trip-id]").forEach(badge => {
+    badge.addEventListener("click", () => openTripDetail(badge.dataset.tripId));
+  });
+  container.querySelectorAll(".entry-photos img").forEach(img => {
+    img.addEventListener("click", () => {
+      const entry = entries.find(e => e.id === img.dataset.entryId);
+      openLightbox((entry.photos || []).map(src => ({ src, caption: entry.title })), Number(img.dataset.photoIndex));
+    });
+  });
+}
+
+// ---- Trips view ------------------------------------------------------------
+
+function filteredTrips() {
+  return trips.filter(t => {
+    if (statusFilter !== "all" && computeStatus(t) !== statusFilter) return false;
+    return matchesSearch([t.name, t.destination, (t.tags || []).join(" ")].join(" "));
+  });
+}
+
+function tripCardHtml(trip) {
+  const status = computeStatus(trip);
+  const nEntries = tripEntries(trip.id).length;
+  const nPhotos = tripEntries(trip.id).reduce((n, e) => n + (e.photos || []).length, 0) + (trip.coverPhoto ? 1 : 0);
+  let dateLabel = "Someday";
+  if (trip.startDate && trip.endDate && trip.startDate !== trip.endDate) dateLabel = `${formatDate(trip.startDate)} – ${formatDate(trip.endDate)}`;
+  else if (trip.startDate) dateLabel = formatDate(trip.startDate);
+  return `
+  <div class="trip-card" data-trip-id="${trip.id}">
+    <div class="trip-cover ${trip.coverPhoto ? "" : "no-photo"}" style="${trip.coverPhoto ? `background-image:url('${trip.coverPhoto}')` : ""}">
+      ${trip.coverPhoto ? "" : `<span class="trip-emoji-big">${escapeHtml(trip.emoji || "📍")}</span>`}
+    </div>
+    <div class="trip-body">
+      <h3 class="trip-name">${escapeHtml(trip.name)}</h3>
+      <div class="trip-destination">${escapeHtml(trip.destination || "")}</div>
+      <span class="status-badge status-${status}"><span class="status-dot"></span>${STATUS_LABELS[status]}</span>
+      ${trip.summary ? `<p class="trip-summary">${escapeHtml(trip.summary)}</p>` : ""}
+      <div class="trip-footer">
+        <span>${dateLabel}</span>
+        <span>${nEntries} ${nEntries === 1 ? "entry" : "entries"} · ${nPhotos} 📷</span>
       </div>
-    `).join("")}
-  `;
+    </div>
+  </div>`;
 }
 
-function formatNutrientValue(v) {
-  if (v >= 100) return Math.round(v);
-  return Math.round(v * 10) / 10;
+function renderTrips() {
+  const grid = document.getElementById("trips-grid");
+  const list = filteredTrips();
+  grid.innerHTML = list.map(tripCardHtml).join("");
+  document.getElementById("trips-empty").classList.toggle("hidden", trips.length !== 0);
+  grid.querySelectorAll(".trip-card").forEach(card => {
+    card.addEventListener("click", () => openTripDetail(card.dataset.tripId));
+  });
 }
 
-// ---- Servings controls ------------------------------------------------
+// ---- Trip detail view --------------------------------------------------------
 
-function setServings(val) {
-  const n = Math.max(0.25, Number(val) || 1);
-  currentServings = Math.round(n * 4) / 4; // quarter-serving precision
-  renderRecipeDetail();
+function openTripDetail(tripId) {
+  currentTripDetailId = tripId;
+  switchTab("trip-detail");
+  renderTripDetail(tripId);
 }
 
-// ---- Custom recipe builder -------------------------------------------
+function renderTripDetail(tripId) {
+  const trip = getTrip(tripId);
+  if (!trip) { switchTab("trips"); return; }
+  const status = computeStatus(trip);
+  let dateLabel = "No dates yet";
+  if (trip.startDate && trip.endDate && trip.startDate !== trip.endDate) dateLabel = `${formatDate(trip.startDate)} – ${formatDate(trip.endDate)}`;
+  else if (trip.startDate) dateLabel = formatDate(trip.startDate);
 
-function openRecipeModal() {
-  document.getElementById("recipe-modal").classList.remove("hidden");
-  document.getElementById("ingredient-rows").innerHTML = "";
-  document.getElementById("recipe-form").reset();
-  ingredientRowCount = 0;
-  addIngredientRow();
-  refreshIngredientDatalist();
-  refreshCategoryDatalist();
+  document.getElementById("trip-detail-header").innerHTML = `
+    ${trip.coverPhoto ? `<div class="trip-cover-banner" style="background-image:url('${trip.coverPhoto}')"></div>` : ""}
+    <div class="trip-detail-top">
+      <div>
+        <h2>${escapeHtml(trip.emoji || "📍")} ${escapeHtml(trip.name)}</h2>
+        <div class="trip-destination">${escapeHtml(trip.destination || "")}</div>
+        <span class="status-badge status-${status}"><span class="status-dot"></span>${STATUS_LABELS[status]}</span>
+        <p class="trip-detail-dates">${dateLabel}</p>
+        ${trip.summary ? `<p>${escapeHtml(trip.summary)}</p>` : ""}
+        ${(trip.tags || []).length ? `<div class="entry-tags">${trip.tags.map(t => `<span class="tag-chip">#${escapeHtml(t)}</span>`).join("")}</div>` : ""}
+      </div>
+      <button type="button" class="btn btn-secondary btn-small" id="edit-trip-btn">Edit Trip</button>
+    </div>`;
+  document.getElementById("edit-trip-btn").addEventListener("click", () => openTripModal(trip.id));
+
+  const entriesList = tripEntries(tripId).sort((a, b) => parseLocalDate(b.date) - parseLocalDate(a.date));
+  const entriesEl = document.getElementById("trip-detail-entries");
+  entriesEl.innerHTML = entriesList.map(e => entryCardHtml(e, { hideTrip: true })).join("")
+    || `<p class="empty-state">No entries for this trip yet.</p>`;
+  bindEntryCardEvents(entriesEl);
+
+  const photos = tripEntries(tripId).flatMap(e => (e.photos || []).map(src => ({ src, caption: e.title })));
+  const photosEl = document.getElementById("trip-detail-photos");
+  photosEl.innerHTML = photos.map((p, i) => `<img src="${p.src}" data-index="${i}" alt="">`).join("");
+  photosEl.querySelectorAll("img").forEach(img => {
+    img.addEventListener("click", () => openLightbox(photos, Number(img.dataset.index)));
+  });
 }
 
-function refreshCategoryDatalist() {
-  const dl = document.getElementById("category-options");
-  const names = groupRecipesByCategory().map(g => g.name);
-  dl.innerHTML = names.map(n => `<option value="${escapeHtml(n)}">`).join("");
-}
-function closeRecipeModal() {
-  document.getElementById("recipe-modal").classList.add("hidden");
-}
+// ---- Photos view --------------------------------------------------------------
 
-function refreshIngredientDatalist() {
-  const dl = document.getElementById("ingredient-options");
-  dl.innerHTML = ingredientDB.map(i => `<option value="${escapeHtml(i.name)}">`).join("");
-}
+function renderPhotosView() {
+  const select = document.getElementById("photos-trip-filter");
+  const prevValue = select.value || "all";
+  select.innerHTML = `<option value="all">All trips</option>` +
+    trips.map(t => `<option value="${t.id}">${escapeHtml(t.emoji || "📍")} ${escapeHtml(t.name)}</option>`).join("");
+  select.value = [...select.options].some(o => o.value === prevValue) ? prevValue : "all";
 
-function addIngredientRow(prefill) {
-  ingredientRowCount++;
-  const rowId = `ing-row-${ingredientRowCount}`;
-  const wrapper = document.createElement("div");
-  wrapper.className = "ingredient-row";
-  wrapper.id = rowId;
-  wrapper.innerHTML = `
-    <input type="text" class="ing-name-input" list="ingredient-options" placeholder="Ingredient name" required value="${prefill ? escapeHtml(prefill.name) : ""}">
-    <input type="number" class="ing-qty-input" step="any" min="0" placeholder="Qty" required value="${prefill ? prefill.quantity : ""}">
-    <select class="ing-unit-input"></select>
-    <button type="button" class="remove-row-btn" title="Remove ingredient">✕</button>
-  `;
-  document.getElementById("ingredient-rows").appendChild(wrapper);
-  populateUnitSelect(wrapper.querySelector(".ing-unit-input"), prefill ? prefill.unit : null);
-  wrapper.querySelector(".remove-row-btn").addEventListener("click", () => wrapper.remove());
+  const photos = allPhotos().filter(p => select.value === "all" || p.tripId === select.value);
+  const grid = document.getElementById("photos-grid-main");
+  grid.innerHTML = photos.map((p, i) => `<img src="${p.src}" data-index="${i}" alt="">`).join("");
+  document.getElementById("photos-empty").classList.toggle("hidden", allPhotos().length !== 0);
+  grid.querySelectorAll("img").forEach(img => {
+    img.addEventListener("click", () => openLightbox(photos, Number(img.dataset.index)));
+  });
 }
 
-function populateUnitSelect(select, selected) {
-  const units = ["g", "kg", "oz", "lb", "ml", "l", "cup", "tbsp", "tsp", "each", "clove", "stick"];
-  select.innerHTML = units.map(u => `<option value="${u}">${u}</option>`).join("");
-  if (selected) select.value = selected;
+// ---- Lightbox -----------------------------------------------------------------
+
+function openLightbox(photos, index) {
+  lightboxPhotos = photos;
+  lightboxIndex = index;
+  showLightboxPhoto();
+  document.getElementById("lightbox").classList.remove("hidden");
 }
+function showLightboxPhoto() {
+  const p = lightboxPhotos[lightboxIndex];
+  if (!p) return;
+  document.getElementById("lightbox-img").src = p.src;
+  document.getElementById("lightbox-caption").textContent = p.caption || "";
+  const multi = lightboxPhotos.length > 1;
+  document.getElementById("lightbox-prev").classList.toggle("hidden", !multi);
+  document.getElementById("lightbox-next").classList.toggle("hidden", !multi);
+}
+function closeLightbox() { document.getElementById("lightbox").classList.add("hidden"); }
 
-function handleSaveRecipe(e) {
-  e.preventDefault();
-  const name = document.getElementById("recipe-name-input").value.trim();
-  const baseServings = Number(document.getElementById("recipe-servings-input").value);
-  const servingLabel = document.getElementById("recipe-serving-label-input").value.trim() || "servings";
-  const category = document.getElementById("recipe-category-input").value.trim() || DEFAULT_CATEGORY;
-  const instructionsRaw = document.getElementById("recipe-instructions-input").value.trim();
-  const instructions = instructionsRaw ? instructionsRaw.split("\n").map(s => s.trim()).filter(Boolean) : [];
+// ---- Tabs -----------------------------------------------------------------
 
-  if (!name || !baseServings || baseServings <= 0) {
-    alert("Please provide a recipe name and a valid serving size.");
-    return;
+function switchTab(tab) {
+  currentTab = tab;
+  document.querySelectorAll(".view").forEach(v => v.classList.add("hidden"));
+  if (tab === "trip-detail") {
+    document.getElementById("view-trip-detail").classList.remove("hidden");
+  } else {
+    document.getElementById(`view-${tab}`).classList.remove("hidden");
   }
+  document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
+}
 
-  const rows = document.querySelectorAll("#ingredient-rows .ingredient-row");
-  const ingredients = [];
-  let hasUnknown = false;
-  rows.forEach(row => {
-    const ingName = row.querySelector(".ing-name-input").value.trim();
-    const qty = Number(row.querySelector(".ing-qty-input").value);
-    const unit = row.querySelector(".ing-unit-input").value;
-    if (!ingName || !qty) return;
-    const match = ingredientDB.find(i => i.name.toLowerCase() === ingName.toLowerCase());
-    if (match) {
-      ingredients.push({ id: match.id, quantity: qty, unit });
-    } else {
-      hasUnknown = true;
-    }
+// ---- Trip modal -----------------------------------------------------------
+
+function openTripModal(tripId) {
+  editingTripId = tripId || null;
+  pendingCoverPhoto = undefined;
+  const trip = tripId ? getTrip(tripId) : null;
+
+  document.getElementById("trip-modal-title").textContent = trip ? "Edit Trip" : "New Trip";
+  document.getElementById("trip-name-input").value = trip ? trip.name : "";
+  document.getElementById("trip-destination-input").value = trip ? trip.destination || "" : "";
+  document.getElementById("trip-start-input").value = trip ? trip.startDate || "" : "";
+  document.getElementById("trip-end-input").value = trip ? trip.endDate || "" : "";
+  document.getElementById("trip-status-input").value = trip ? trip.status || "idea" : "idea";
+  document.getElementById("trip-emoji-input").value = trip ? trip.emoji || "" : "";
+  document.getElementById("trip-summary-input").value = trip ? trip.summary || "" : "";
+  document.getElementById("trip-tags-input").value = trip ? (trip.tags || []).join(", ") : "";
+  document.getElementById("trip-cover-input").value = "";
+  renderTripCoverPreview(trip ? trip.coverPhoto : null);
+  document.getElementById("delete-trip-btn").classList.toggle("hidden", !trip);
+
+  document.getElementById("emoji-suggestions").innerHTML = EMOJI_SUGGESTIONS.map(em =>
+    `<button type="button" data-emoji="${em}">${em}</button>`).join("");
+  document.getElementById("emoji-suggestions").querySelectorAll("button").forEach(btn => {
+    btn.addEventListener("click", () => { document.getElementById("trip-emoji-input").value = btn.dataset.emoji; });
   });
 
-  if (ingredients.length === 0) {
-    alert(hasUnknown
-      ? "None of the ingredients matched the database. Add unknown ingredients first via 'Add Ingredient to Database'."
-      : "Please add at least one ingredient.");
-    return;
-  }
-  if (hasUnknown) {
-    const proceed = confirm("Some ingredients weren't found in the database and will be skipped. Continue anyway?");
-    if (!proceed) return;
-  }
-
-  const id = "custom_" + name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") + "_" + Date.now();
-  const recipe = { id, name, baseServings, servingLabel, category, ingredients, instructions, emoji: "📝",
-    description: "Your custom recipe" };
-
-  const custom = loadCustomRecipes();
-  custom.push(recipe);
-  saveCustomRecipes(custom);
-  rebuildDatabases();
-  renderRecipeGrid();
-  closeRecipeModal();
-  selectRecipe(id);
+  openModal("trip-modal");
 }
 
-function handleDeleteRecipe() {
-  const recipe = getRecipe(currentRecipeId);
-  if (!recipe || !recipe.custom) return;
-  if (!confirm(`Delete "${recipe.name}"? This cannot be undone.`)) return;
-  const custom = loadCustomRecipes().filter(r => r.id !== recipe.id);
-  saveCustomRecipes(custom);
-  rebuildDatabases();
-  currentRecipeId = null;
-  document.getElementById("recipe-detail").classList.add("hidden");
-  renderRecipeGrid();
+function renderTripCoverPreview(src) {
+  const el = document.getElementById("trip-cover-preview");
+  const effective = pendingCoverPhoto !== undefined ? pendingCoverPhoto : src;
+  el.innerHTML = effective ? `<div class="photo-thumb"><img src="${effective}"><button type="button" class="remove-photo-btn" id="remove-cover-btn">✕</button></div>` : "";
+  const removeBtn = document.getElementById("remove-cover-btn");
+  if (removeBtn) removeBtn.addEventListener("click", () => { pendingCoverPhoto = null; renderTripCoverPreview(null); });
 }
 
-// ---- Custom ingredient builder -----------------------------------------
-
-function openIngredientModal() {
-  document.getElementById("ingredient-modal").classList.remove("hidden");
-  document.getElementById("ingredient-form").reset();
-}
-function closeIngredientModal() {
-  document.getElementById("ingredient-modal").classList.add("hidden");
-}
-
-function handleSaveIngredient(e) {
+function saveTripForm(e) {
   e.preventDefault();
-  const name = document.getElementById("new-ing-name").value.trim();
+  const name = document.getElementById("trip-name-input").value.trim();
   if (!name) return;
-  const id = "custom_" + name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") + "_" + Date.now();
-
-  const per100g = {};
-  NUTRIENT_KEYS.forEach(k => {
-    const el = document.getElementById(`new-ing-${k}`);
-    per100g[k] = Number(el.value) || 0;
-  });
-
-  const units = {};
-  ["cup", "tbsp", "tsp", "each"].forEach(u => {
-    const el = document.getElementById(`new-ing-unit-${u}`);
-    const val = Number(el.value);
-    if (val > 0) units[u] = val;
-  });
-
-  const ingredient = { id, name, category: "Custom", per100g, units };
-  const custom = loadCustomIngredients();
-  custom.push(ingredient);
-  saveCustomIngredients(custom);
-  rebuildDatabases();
-  refreshIngredientDatalist();
-  closeIngredientModal();
-  alert(`"${name}" added to your ingredient database. You can now use it in a recipe.`);
+  const coverPhoto = pendingCoverPhoto !== undefined ? pendingCoverPhoto : (getTrip(editingTripId)?.coverPhoto || null);
+  const data = {
+    name,
+    destination: document.getElementById("trip-destination-input").value.trim(),
+    startDate: document.getElementById("trip-start-input").value || null,
+    endDate: document.getElementById("trip-end-input").value || null,
+    status: document.getElementById("trip-status-input").value,
+    emoji: document.getElementById("trip-emoji-input").value.trim() || "📍",
+    coverPhoto,
+    summary: document.getElementById("trip-summary-input").value.trim(),
+    tags: parseTags(document.getElementById("trip-tags-input").value)
+  };
+  if (editingTripId) {
+    const trip = getTrip(editingTripId);
+    Object.assign(trip, data, { updatedAt: Date.now() });
+  } else {
+    trips.push({ id: uid(), createdAt: Date.now(), updatedAt: Date.now(), ...data });
+  }
+  saveTrips();
+  closeModal("trip-modal");
+  renderAll();
 }
 
-// ---- Wiring ---------------------------------------------------------------
-
-function init() {
-  rebuildDatabases();
-  renderRecipeGrid();
-
-  document.getElementById("servings-input").addEventListener("input", e => setServings(e.target.value));
-  document.getElementById("servings-minus").addEventListener("click", () => {
-    setServings(currentServings - 1);
-  });
-  document.getElementById("servings-plus").addEventListener("click", () => {
-    setServings(currentServings + 1);
-  });
-  document.querySelectorAll('input[name="nutrition-mode"]').forEach(r =>
-    r.addEventListener("change", () => renderRecipeDetail())
-  );
-
-  document.getElementById("add-recipe-btn").addEventListener("click", openRecipeModal);
-  document.getElementById("close-recipe-modal").addEventListener("click", closeRecipeModal);
-  document.getElementById("cancel-recipe-btn").addEventListener("click", closeRecipeModal);
-  document.getElementById("recipe-form").addEventListener("submit", handleSaveRecipe);
-  document.getElementById("add-ingredient-row-btn").addEventListener("click", () => addIngredientRow());
-  document.getElementById("delete-recipe-btn").addEventListener("click", handleDeleteRecipe);
-
-  document.getElementById("add-ingredient-btn").addEventListener("click", openIngredientModal);
-  document.getElementById("close-ingredient-modal").addEventListener("click", closeIngredientModal);
-  document.getElementById("cancel-ingredient-btn").addEventListener("click", closeIngredientModal);
-  document.getElementById("ingredient-form").addEventListener("submit", handleSaveIngredient);
-
-  document.getElementById("search-input").addEventListener("input", e => applySearchFilter(e.target.value));
-  document.getElementById("expand-all-btn").addEventListener("click", () => expandAllCategories(true));
-  document.getElementById("collapse-all-btn").addEventListener("click", () => expandAllCategories(false));
+function deleteTrip() {
+  if (!editingTripId) return;
+  const trip = getTrip(editingTripId);
+  const n = tripEntries(editingTripId).length;
+  const msg = n ? `Delete "${trip.name}"? Its ${n} journal ${n === 1 ? "entry" : "entries"} will become unassigned (not deleted).` : `Delete "${trip.name}"? This cannot be undone.`;
+  if (!confirm(msg)) return;
+  trips = trips.filter(t => t.id !== editingTripId);
+  entries.forEach(e => { if (e.tripId === editingTripId) e.tripId = null; });
+  saveTrips(); saveEntries();
+  closeModal("trip-modal");
+  if (currentTripDetailId === editingTripId) switchTab("trips");
+  renderAll();
 }
 
-document.addEventListener("DOMContentLoaded", init);
+// ---- Entry modal ------------------------------------------------------------
+
+function populateTripSelect(selectedId) {
+  const select = document.getElementById("entry-trip-select");
+  select.innerHTML = `<option value="">— General (no trip) —</option>` +
+    trips.map(t => `<option value="${t.id}">${escapeHtml(t.emoji || "📍")} ${escapeHtml(t.name)}</option>`).join("");
+  select.value = selectedId || "";
+}
+
+function openEntryModal(entryId, defaultTripId) {
+  editingEntryId = entryId || null;
+  const entry = entryId ? entries.find(e => e.id === entryId) : null;
+  pendingEntryPhotos = entry ? [...(entry.photos || [])] : [];
+
+  document.getElementById("entry-modal-title").textContent = entry ? "Edit Entry" : "New Entry";
+  document.querySelector(`input[name="entry-format"][value="${entry ? entry.format : "story"}"]`).checked = true;
+  document.getElementById("entry-title-input").value = entry ? entry.title : "";
+  document.getElementById("entry-date-input").value = entry ? entry.date : new Date().toISOString().slice(0, 10);
+  populateTripSelect(entry ? entry.tripId : defaultTripId);
+  document.getElementById("entry-body-input").value = entry ? entry.body : "";
+  document.getElementById("entry-tags-input").value = entry ? (entry.tags || []).join(", ") : "";
+  document.getElementById("entry-photos-input").value = "";
+  renderEntryPhotosPreview();
+  document.getElementById("delete-entry-btn").classList.toggle("hidden", !entry);
+
+  openModal("entry-modal");
+}
+
+function renderEntryPhotosPreview() {
+  const el = document.getElementById("entry-photos-preview");
+  el.innerHTML = pendingEntryPhotos.map((src, i) =>
+    `<div class="photo-thumb"><img src="${src}"><button type="button" class="remove-photo-btn" data-index="${i}">✕</button></div>`).join("");
+  el.querySelectorAll(".remove-photo-btn").forEach(btn => {
+    btn.addEventListener("click", () => { pendingEntryPhotos.splice(Number(btn.dataset.index), 1); renderEntryPhotosPreview(); });
+  });
+}
+
+async function handleEntryPhotosInput(e) {
+  const files = [...e.target.files];
+  for (const file of files) {
+    try { pendingEntryPhotos.push(await compressImage(file)); }
+    catch (err) { console.error(err); }
+  }
+  renderEntryPhotosPreview();
+  e.target.value = "";
+}
+
+async function handleTripCoverInput(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  try { pendingCoverPhoto = await compressImage(file, 1400, 0.75); renderTripCoverPreview(null); }
+  catch (err) { console.error(err); }
+  e.target.value = "";
+}
+
+function saveEntryForm(e) {
+  e.preventDefault();
+  const title = document.getElementById("entry-title-input").value.trim();
+  const body = document.getElementById("entry-body-input").value.trim();
+  if (!title || !body) return;
+  const data = {
+    format: document.querySelector('input[name="entry-format"]:checked').value,
+    title,
+    date: document.getElementById("entry-date-input").value,
+    tripId: document.getElementById("entry-trip-select").value || null,
+    body,
+    photos: [...pendingEntryPhotos],
+    tags: parseTags(document.getElementById("entry-tags-input").value)
+  };
+  if (editingEntryId) {
+    const entry = entries.find(e2 => e2.id === editingEntryId);
+    Object.assign(entry, data, { updatedAt: Date.now() });
+  } else {
+    entries.push({ id: uid(), createdAt: Date.now(), updatedAt: Date.now(), ...data });
+  }
+  saveEntries();
+  closeModal("entry-modal");
+  renderAll();
+}
+
+function deleteEntry() {
+  if (!editingEntryId) return;
+  if (!confirm("Delete this entry? This cannot be undone.")) return;
+  entries = entries.filter(e => e.id !== editingEntryId);
+  expandedEntryIds.delete(editingEntryId);
+  saveEntries();
+  closeModal("entry-modal");
+  renderAll();
+}
+
+// ---- Modals (generic) --------------------------------------------------------
+
+function openModal(id) { document.getElementById(id).classList.remove("hidden"); }
+function closeModal(id) { document.getElementById(id).classList.add("hidden"); }
+
+// ---- Import / Export ----------------------------------------------------------
+
+function exportData() {
+  const payload = { version: 1, exportedAt: new Date().toISOString(), trips, entries };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `travel-journal-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function importData(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    let payload;
+    try { payload = JSON.parse(e.target.result); }
+    catch (err) { alert("That doesn't look like a valid backup file."); return; }
+    if (!Array.isArray(payload.trips) || !Array.isArray(payload.entries)) {
+      alert("That doesn't look like a valid Travel Journal backup file."); return;
+    }
+    if (!confirm(`Import ${payload.trips.length} trips and ${payload.entries.length} entries? This will replace everything currently in your journal.`)) return;
+    trips = payload.trips;
+    entries = payload.entries;
+    saveTrips(); saveEntries();
+    currentTripDetailId = null;
+    switchTab("timeline");
+    renderAll();
+  };
+  reader.readAsText(file);
+}
+
+// ---- Event wiring ---------------------------------------------------------
+
+function bindStaticEvents() {
+  document.getElementById("tabs").addEventListener("click", e => {
+    const btn = e.target.closest(".tab-btn");
+    if (btn) switchTab(btn.dataset.tab);
+  });
+  document.getElementById("back-to-trips").addEventListener("click", () => { currentTripDetailId = null; switchTab("trips"); });
+
+  document.getElementById("search-input").addEventListener("input", e => { searchQuery = e.target.value; renderTimeline(); renderTrips(); });
+
+  document.getElementById("format-filter").addEventListener("click", e => {
+    const btn = e.target.closest(".chip-btn");
+    if (!btn) return;
+    formatFilter = btn.dataset.format;
+    document.querySelectorAll("#format-filter .chip-btn").forEach(b => b.classList.toggle("active", b === btn));
+    renderTimeline();
+  });
+  document.getElementById("status-filter").addEventListener("click", e => {
+    const btn = e.target.closest(".chip-btn");
+    if (!btn) return;
+    statusFilter = btn.dataset.status;
+    document.querySelectorAll("#status-filter .chip-btn").forEach(b => b.classList.toggle("active", b === btn));
+    renderTrips();
+  });
+  document.getElementById("sort-toggle-btn").addEventListener("click", () => {
+    sortNewestFirst = !sortNewestFirst;
+    document.getElementById("sort-toggle-btn").textContent = sortNewestFirst ? "Newest first" : "Oldest first";
+    renderTimeline();
+  });
+  document.getElementById("photos-trip-filter").addEventListener("change", renderPhotosView);
+
+  document.getElementById("new-trip-btn").addEventListener("click", () => openTripModal(null));
+  document.getElementById("new-entry-btn").addEventListener("click", () => openEntryModal(null));
+  document.getElementById("timeline-empty-cta").addEventListener("click", () => openEntryModal(null));
+  document.getElementById("trips-empty-cta").addEventListener("click", () => openTripModal(null));
+  document.getElementById("trip-add-entry-btn").addEventListener("click", () => openEntryModal(null, currentTripDetailId));
+
+  document.getElementById("trip-form").addEventListener("submit", saveTripForm);
+  document.getElementById("delete-trip-btn").addEventListener("click", deleteTrip);
+  document.getElementById("trip-cover-input").addEventListener("change", handleTripCoverInput);
+
+  document.getElementById("entry-form").addEventListener("submit", saveEntryForm);
+  document.getElementById("delete-entry-btn").addEventListener("click", deleteEntry);
+  document.getElementById("entry-photos-input").addEventListener("change", handleEntryPhotosInput);
+
+  document.querySelectorAll(".close-modal-btn").forEach(btn => {
+    btn.addEventListener("click", () => closeModal(btn.dataset.modal));
+  });
+  document.querySelectorAll(".modal").forEach(modal => {
+    modal.addEventListener("click", e => { if (e.target === modal) closeModal(modal.id); });
+  });
+
+  document.getElementById("export-btn").addEventListener("click", exportData);
+  document.getElementById("import-btn").addEventListener("click", () => document.getElementById("import-file").click());
+  document.getElementById("import-file").addEventListener("change", e => { if (e.target.files[0]) importData(e.target.files[0]); });
+
+  document.getElementById("lightbox-close").addEventListener("click", closeLightbox);
+  document.getElementById("lightbox").addEventListener("click", e => { if (e.target.id === "lightbox") closeLightbox(); });
+  document.getElementById("lightbox-prev").addEventListener("click", () => { lightboxIndex = (lightboxIndex - 1 + lightboxPhotos.length) % lightboxPhotos.length; showLightboxPhoto(); });
+  document.getElementById("lightbox-next").addEventListener("click", () => { lightboxIndex = (lightboxIndex + 1) % lightboxPhotos.length; showLightboxPhoto(); });
+  document.addEventListener("keydown", e => {
+    if (document.getElementById("lightbox").classList.contains("hidden")) return;
+    if (e.key === "Escape") closeLightbox();
+    if (e.key === "ArrowLeft") document.getElementById("lightbox-prev").click();
+    if (e.key === "ArrowRight") document.getElementById("lightbox-next").click();
+  });
+  document.addEventListener("keydown", e => {
+    if (e.key !== "Escape") return;
+    document.querySelectorAll(".modal:not(.hidden)").forEach(m => closeModal(m.id));
+  });
+}

@@ -3,155 +3,230 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Recipe Calculator — Servings & Macros</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🍳</text></svg>">
+<title>Travel Journal</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🧭</text></svg>">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
 <header class="app-header">
   <div class="header-inner">
-    <h1>🍳 Recipe Calculator</h1>
-    <p>Scale any recipe to the serving size you need and see calories, macros, and nutrients update instantly.</p>
+    <h1>🧭 Travel Journal</h1>
+    <p>Plan what's next, remember what happened, and write it all down — trips, notes, insights, photos, and stories in one place.</p>
   </div>
 </header>
 
 <main class="app-main">
   <section class="toolbar">
-    <input type="search" id="search-input" placeholder="Search recipes…" aria-label="Search recipes">
+    <input type="search" id="search-input" placeholder="Search trips, entries, tags…" aria-label="Search">
+    <nav class="tabs" id="tabs" aria-label="Views">
+      <button class="tab-btn active" data-tab="timeline">Timeline</button>
+      <button class="tab-btn" data-tab="trips">Trips</button>
+      <button class="tab-btn" data-tab="photos">Photos</button>
+    </nav>
     <div class="toolbar-actions">
-      <button id="expand-all-btn" class="btn btn-secondary btn-small">Expand all</button>
-      <button id="collapse-all-btn" class="btn btn-secondary btn-small">Collapse all</button>
-      <button id="add-ingredient-btn" class="btn btn-secondary">+ Add Ingredient to Database</button>
-      <button id="add-recipe-btn" class="btn btn-primary">+ Add Custom Recipe</button>
+      <button id="export-btn" class="btn btn-secondary btn-small" title="Download a backup of your journal">Export</button>
+      <button id="import-btn" class="btn btn-secondary btn-small" title="Restore from a backup file">Import</button>
+      <input type="file" id="import-file" accept="application/json" hidden>
+      <button id="new-trip-btn" class="btn btn-secondary">+ New Trip</button>
+      <button id="new-entry-btn" class="btn btn-primary">+ New Entry</button>
     </div>
   </section>
 
-  <div id="recipe-categories" class="recipe-categories" aria-label="Recipe categories"></div>
-  <p id="no-results" class="no-results hidden">No recipes match your search.</p>
+  <section id="stats-bar" class="stats-bar" aria-label="Journal stats"></section>
 
-  <section id="recipe-detail" class="recipe-detail hidden">
-    <div class="detail-header">
-      <div>
-        <h2 id="detail-title"></h2>
-        <p id="detail-desc" class="detail-desc"></p>
+  <!-- Timeline view -->
+  <section id="view-timeline" class="view">
+    <div id="upcoming-strip" class="upcoming-strip"></div>
+    <div class="timeline-controls">
+      <div class="format-filter" id="format-filter">
+        <button class="chip-btn active" data-format="all">All</button>
+        <button class="chip-btn" data-format="story">📖 Stories</button>
+        <button class="chip-btn" data-format="note">📝 Notes</button>
       </div>
-      <button id="delete-recipe-btn" class="btn btn-danger hidden">Delete Recipe</button>
+      <button id="sort-toggle-btn" class="btn btn-secondary btn-small">Newest first</button>
     </div>
-
-    <div class="servings-control">
-      <label for="servings-input">Servings</label>
-      <div class="stepper">
-        <button id="servings-minus" type="button" aria-label="Decrease servings">−</button>
-        <input type="number" id="servings-input" min="0.25" step="0.25">
-        <button id="servings-plus" type="button" aria-label="Increase servings">+</button>
-      </div>
-      <span id="base-servings-note" class="base-note"></span>
+    <div id="timeline-feed" class="timeline-feed"></div>
+    <div id="timeline-empty" class="empty-state hidden">
+      <p class="empty-emoji">🗺️</p>
+      <h3>Your journal is empty</h3>
+      <p>Log a story from a past trip, jot a quick note, or start planning something new.</p>
+      <button id="timeline-empty-cta" class="btn btn-primary">+ New Entry</button>
     </div>
+  </section>
 
-    <div class="detail-grid">
-      <div class="detail-col">
-        <h3>Ingredients</h3>
-        <ul id="ingredient-list" class="ingredient-list"></ul>
+  <!-- Trips view -->
+  <section id="view-trips" class="view hidden">
+    <div class="status-filter" id="status-filter">
+      <button class="chip-btn active" data-status="all">All</button>
+      <button class="chip-btn" data-status="idea">💭 Idea</button>
+      <button class="chip-btn" data-status="planning">🧳 Planning</button>
+      <button class="chip-btn" data-status="upcoming">🔜 Upcoming</button>
+      <button class="chip-btn" data-status="ongoing">✈️ Ongoing</button>
+      <button class="chip-btn" data-status="past">✅ Past</button>
+    </div>
+    <div id="trips-grid" class="trips-grid"></div>
+    <div id="trips-empty" class="empty-state hidden">
+      <p class="empty-emoji">🧭</p>
+      <h3>No trips yet</h3>
+      <p>Add a place you've been, or one you're dreaming about.</p>
+      <button id="trips-empty-cta" class="btn btn-primary">+ New Trip</button>
+    </div>
+  </section>
 
-        <h3>Instructions</h3>
-        <ol id="instruction-list" class="instruction-list"></ol>
-      </div>
+  <!-- Trip detail view -->
+  <section id="view-trip-detail" class="view hidden">
+    <button id="back-to-trips" class="btn btn-secondary btn-small back-btn">← Back to Trips</button>
+    <div id="trip-detail-header"></div>
+    <div class="trip-detail-toolbar">
+      <h3>Journal &amp; Notes</h3>
+      <button id="trip-add-entry-btn" class="btn btn-primary btn-small">+ Add Entry</button>
+    </div>
+    <div id="trip-detail-entries" class="timeline-feed"></div>
+    <div id="trip-detail-photos" class="photos-grid"></div>
+  </section>
 
-      <div class="detail-col">
-        <div class="nutrition-toggle">
-          <label><input type="radio" name="nutrition-mode" value="perServing" checked> Per Serving</label>
-          <label><input type="radio" name="nutrition-mode" value="total"> Whole Batch</label>
-        </div>
-        <div id="nutrition-facts" class="nutrition-facts"></div>
-      </div>
+  <!-- Photos view -->
+  <section id="view-photos" class="view hidden">
+    <select id="photos-trip-filter" class="trip-select"></select>
+    <div id="photos-grid-main" class="photos-grid"></div>
+    <div id="photos-empty" class="empty-state hidden">
+      <p class="empty-emoji">📷</p>
+      <h3>No photos yet</h3>
+      <p>Photos you add to entries and trip covers will show up here.</p>
     </div>
   </section>
 </main>
 
-<!-- Add Recipe Modal -->
-<div id="recipe-modal" class="modal hidden">
+<!-- Trip Modal -->
+<div id="trip-modal" class="modal hidden">
   <div class="modal-content">
     <div class="modal-header">
-      <h2>Add Custom Recipe</h2>
-      <button id="close-recipe-modal" class="icon-btn" aria-label="Close">✕</button>
+      <h2 id="trip-modal-title">New Trip</h2>
+      <button class="icon-btn close-modal-btn" data-modal="trip-modal" aria-label="Close">✕</button>
     </div>
-    <form id="recipe-form">
-      <label>Recipe name
-        <input type="text" id="recipe-name-input" required>
-      </label>
+    <form id="trip-form">
       <div class="form-row">
-        <label>Base servings (as written)
-          <input type="number" id="recipe-servings-input" min="0.25" step="0.25" required>
+        <label>Trip name
+          <input type="text" id="trip-name-input" placeholder="e.g. Kyoto in autumn" required>
         </label>
-        <label>Serving label
-          <input type="text" id="recipe-serving-label-input" placeholder="e.g. servings, cookies">
+        <label>Destination
+          <input type="text" id="trip-destination-input" placeholder="e.g. Kyoto, Japan">
         </label>
       </div>
-      <label>Category
-        <input type="text" id="recipe-category-input" list="category-options" placeholder="e.g. Breakfast, Desserts & Sweets">
+
+      <div class="form-row">
+        <label>Start date <span class="hint-inline">(optional)</span>
+          <input type="date" id="trip-start-input">
+        </label>
+        <label>End date <span class="hint-inline">(optional)</span>
+          <input type="date" id="trip-end-input">
+        </label>
+      </div>
+
+      <label>Status
+        <select id="trip-status-input">
+          <option value="idea">💭 Idea — someday, no dates yet</option>
+          <option value="planning">🧳 Planning — actively arranging it</option>
+          <option value="upcoming">🔜 Upcoming</option>
+          <option value="ongoing">✈️ Ongoing</option>
+          <option value="past">✅ Past / completed</option>
+        </select>
+        <span class="hint">If you set start/end dates, the status shown on the trip will update automatically as time passes.</span>
       </label>
-      <datalist id="category-options"></datalist>
 
-      <h3>Ingredients</h3>
-      <datalist id="ingredient-options"></datalist>
-      <div id="ingredient-rows" class="ingredient-rows"></div>
-      <button type="button" id="add-ingredient-row-btn" class="btn btn-secondary btn-small">+ Add Ingredient Row</button>
-      <p class="hint">Type an ingredient name that matches one in the database (autocomplete will help). Need something new? Use "Add Ingredient to Database" first.</p>
+      <label>Emoji
+        <input type="text" id="trip-emoji-input" maxlength="4" placeholder="📍">
+      </label>
+      <div class="emoji-suggestions" id="emoji-suggestions"></div>
 
-      <label>Instructions (one step per line)
-        <textarea id="recipe-instructions-input" rows="5"></textarea>
+      <label>Cover photo
+        <input type="file" id="trip-cover-input" accept="image/*">
+      </label>
+      <div id="trip-cover-preview" class="photo-preview-row"></div>
+
+      <label>Summary
+        <textarea id="trip-summary-input" rows="3" placeholder="What's this trip about?"></textarea>
+      </label>
+
+      <label>Tags <span class="hint-inline">(comma-separated)</span>
+        <input type="text" id="trip-tags-input" placeholder="e.g. solo, hiking, food">
       </label>
 
       <div class="modal-actions">
-        <button type="button" id="cancel-recipe-btn" class="btn btn-secondary">Cancel</button>
-        <button type="submit" class="btn btn-primary">Save Recipe</button>
+        <button type="button" id="delete-trip-btn" class="btn btn-danger hidden">Delete Trip</button>
+        <span class="spacer"></span>
+        <button type="button" class="btn btn-secondary close-modal-btn" data-modal="trip-modal">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save Trip</button>
       </div>
     </form>
   </div>
 </div>
 
-<!-- Add Ingredient Modal -->
-<div id="ingredient-modal" class="modal hidden">
+<!-- Entry Modal -->
+<div id="entry-modal" class="modal hidden">
   <div class="modal-content">
     <div class="modal-header">
-      <h2>Add Ingredient to Database</h2>
-      <button id="close-ingredient-modal" class="icon-btn" aria-label="Close">✕</button>
+      <h2 id="entry-modal-title">New Entry</h2>
+      <button class="icon-btn close-modal-btn" data-modal="entry-modal" aria-label="Close">✕</button>
     </div>
-    <form id="ingredient-form">
-      <label>Ingredient name
-        <input type="text" id="new-ing-name" required>
+    <form id="entry-form">
+      <div class="format-toggle" id="entry-format-toggle">
+        <label class="format-option">
+          <input type="radio" name="entry-format" value="story" checked>
+          <span>📖 Story <small>a full blog / short-story entry</small></span>
+        </label>
+        <label class="format-option">
+          <input type="radio" name="entry-format" value="note">
+          <span>📝 Note <small>a quick insight, tip, or reminder</small></span>
+        </label>
+      </div>
+
+      <div class="form-row">
+        <label>Title
+          <input type="text" id="entry-title-input" required placeholder="e.g. Getting lost in Gion">
+        </label>
+        <label>Date
+          <input type="date" id="entry-date-input" required>
+        </label>
+      </div>
+
+      <label>Trip
+        <select id="entry-trip-select"></select>
       </label>
 
-      <h3>Nutrition per 100g</h3>
-      <div class="form-grid">
-        <label>Calories (kcal)<input type="number" id="new-ing-calories" step="any" min="0" value="0"></label>
-        <label>Protein (g)<input type="number" id="new-ing-protein" step="any" min="0" value="0"></label>
-        <label>Carbs (g)<input type="number" id="new-ing-carbs" step="any" min="0" value="0"></label>
-        <label>Fat (g)<input type="number" id="new-ing-fat" step="any" min="0" value="0"></label>
-        <label>Fiber (g)<input type="number" id="new-ing-fiber" step="any" min="0" value="0"></label>
-        <label>Sugar (g)<input type="number" id="new-ing-sugar" step="any" min="0" value="0"></label>
-        <label>Sodium (mg)<input type="number" id="new-ing-sodium" step="any" min="0" value="0"></label>
-      </div>
+      <label>Write it down
+        <textarea id="entry-body-input" rows="8" placeholder="Leave a blank line between paragraphs…" required></textarea>
+      </label>
 
-      <h3>Optional: grams per measure</h3>
-      <p class="hint">Fill these in so the ingredient can be used with cup/tbsp/tsp/each measurements in recipes.</p>
-      <div class="form-grid">
-        <label>1 cup = ? g<input type="number" id="new-ing-unit-cup" step="any" min="0"></label>
-        <label>1 tbsp = ? g<input type="number" id="new-ing-unit-tbsp" step="any" min="0"></label>
-        <label>1 tsp = ? g<input type="number" id="new-ing-unit-tsp" step="any" min="0"></label>
-        <label>1 each = ? g<input type="number" id="new-ing-unit-each" step="any" min="0"></label>
-      </div>
+      <label>Photos
+        <input type="file" id="entry-photos-input" accept="image/*" multiple>
+      </label>
+      <div id="entry-photos-preview" class="photo-preview-row"></div>
+
+      <label>Tags <span class="hint-inline">(comma-separated)</span>
+        <input type="text" id="entry-tags-input" placeholder="e.g. food, temples, mishap">
+      </label>
 
       <div class="modal-actions">
-        <button type="button" id="cancel-ingredient-btn" class="btn btn-secondary">Cancel</button>
-        <button type="submit" class="btn btn-primary">Save Ingredient</button>
+        <button type="button" id="delete-entry-btn" class="btn btn-danger hidden">Delete Entry</button>
+        <span class="spacer"></span>
+        <button type="button" class="btn btn-secondary close-modal-btn" data-modal="entry-modal">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save Entry</button>
       </div>
     </form>
   </div>
 </div>
 
-<script src="data.js"></script>
+<!-- Lightbox -->
+<div id="lightbox" class="lightbox hidden">
+  <button id="lightbox-close" class="icon-btn lightbox-close" aria-label="Close">✕</button>
+  <button id="lightbox-prev" class="icon-btn lightbox-nav lightbox-prev" aria-label="Previous photo">‹</button>
+  <img id="lightbox-img" alt="">
+  <button id="lightbox-next" class="icon-btn lightbox-nav lightbox-next" aria-label="Next photo">›</button>
+  <p id="lightbox-caption" class="lightbox-caption"></p>
+</div>
+
 <script src="app.js"></script>
 </body>
 </html>
