@@ -1,9 +1,7 @@
-# Recipe Calculator
+# Wayfarer — Travel Journal
 
-A browser-based calculator for cookbook recipes. Pick a recipe, set the
-number of servings you want to make, and every ingredient amount plus the
-full nutrition breakdown (calories, macros, and key nutrients) updates
-instantly — per serving or for the whole batch.
+A browser-based travel journal for logging both past and future trips —
+notes, insights, photos, and journal entries in blog/short-story format.
 
 ## Running it
 
@@ -18,37 +16,43 @@ then visit `http://localhost:8000`.
 
 ## Features
 
-- **Serving-size scaling** — enter any serving count (supports fractional
-  servings) and every ingredient quantity scales proportionally, displayed
-  as friendly fractions (e.g. "1 1/2 cups").
-- **Live nutrition facts** — calories, protein, carbs, fat, fiber, sugar,
-  and sodium, shown per serving or for the whole batch.
-- **6 built-in recipes** spanning baking, breakfast, dinner, and snacks,
-  each backed by real ingredient-level nutrition data.
-- **~45-ingredient nutrition database** with per-100g nutrition and
-  kitchen-measure conversions (cup/tbsp/tsp/each/clove/stick) so amounts
-  in any common unit convert correctly.
-- **Add your own recipes** — build a recipe from ingredients already in the
-  database via the "+ Add Custom Recipe" form.
-- **Add your own ingredients** — for anything not in the database, add it
-  with its own per-100g nutrition and measure conversions via
-  "+ Add Ingredient to Database".
-- Custom recipes/ingredients persist in the browser (`localStorage`), so
-  they're still there next time you load the page.
+- **Trips, past and future** — every trip has a destination, date range,
+  summary, tags, and cover photo, and is automatically sorted into
+  Upcoming or Past based on today's date.
+- **Journal entries in blog/short-story format** — write freeform entries
+  attached to a trip (or standalone), with a title, date, mood/icon,
+  tags, and a body that renders as proper paragraphs.
+- **Photos** — attach a cover photo to a trip and multiple photos to any
+  entry via file upload; they're stored as part of the entry/trip and
+  shown in cards, trip heroes, and the entry reader's photo grid.
+- **Notes & insights** — tag entries and trips freely (e.g. `food`,
+  `hiking`, `planning`) and filter the whole journal by tag or free-text
+  search across trips and entries.
+- **Journal feed** — a blog-style feed of every entry across all trips,
+  most recent first, independent of the trip view.
+- **Trip detail pages** — a hero view per trip with its own timeline of
+  entries, so a single trip reads like a mini travelogue.
+- Everything persists in the browser (`localStorage`), so trips and
+  entries are still there next time you load the page. Ships with a set
+  of sample past and upcoming trips to show the app in action.
 
 ## Files
 
-- `index.html` — page structure and modals
+- `index.html` — page structure, views, and modals
 - `style.css` — styling (light/dark aware)
-- `data.js` — ingredient nutrition database and built-in recipes
-- `app.js` — scaling math, unit conversion, rendering, and custom
-  recipe/ingredient forms
+- `data.js` — seed trips and journal entries (used only to initialize
+  storage the first time the app runs)
+- `app.js` — state management, rendering, search/filtering, and the
+  trip/entry forms (including photo uploads)
 
-## How the math works
+## Data model
 
-Each recipe stores ingredient amounts for its original ("base") serving
-count. Scaling multiplies every ingredient quantity by
-`desiredServings / baseServings`. Each ingredient carries nutrition per
-100g plus gram weights for the units it's used in (e.g. 1 cup of flour =
-120g), so scaled quantities convert to grams and then to
-calories/macros/nutrients, summed across all ingredients.
+Each **trip** has a name, destination/country, start/end dates, a theme
+(used for its placeholder cover art when no photo is set), a summary,
+and tags. Its status (Upcoming / Ongoing / Past) is computed from its
+dates against today.
+
+Each **entry** has a title, date, optional mood/icon, tags, one or more
+photos, and a body. An entry can belong to a trip or stand alone as a
+general note. Paragraphs are separated by a blank line in the editor and
+rendered as separate `<p>` elements in the reader view.

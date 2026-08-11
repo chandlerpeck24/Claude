@@ -3,149 +3,203 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Recipe Calculator — Servings & Macros</title>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🍳</text></svg>">
+<title>Wayfarer — Travel Journal</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🧭</text></svg>">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
 <header class="app-header">
   <div class="header-inner">
-    <h1>🍳 Recipe Calculator</h1>
-    <p>Scale any recipe to the serving size you need and see calories, macros, and nutrients update instantly.</p>
+    <h1>🧭 Wayfarer</h1>
+    <p>Trips, notes, and stories — past and still to come.</p>
   </div>
+  <nav class="main-nav" aria-label="Main navigation">
+    <button class="nav-tab active" data-view="trips">Trips</button>
+    <button class="nav-tab" data-view="journal">Journal</button>
+  </nav>
 </header>
 
 <main class="app-main">
+
   <section class="toolbar">
-    <input type="search" id="search-input" placeholder="Search recipes…" aria-label="Search recipes">
-    <div class="toolbar-actions">
-      <button id="expand-all-btn" class="btn btn-secondary btn-small">Expand all</button>
-      <button id="collapse-all-btn" class="btn btn-secondary btn-small">Collapse all</button>
-      <button id="add-ingredient-btn" class="btn btn-secondary">+ Add Ingredient to Database</button>
-      <button id="add-recipe-btn" class="btn btn-primary">+ Add Custom Recipe</button>
+    <input type="search" id="search-input" placeholder="Search trips and entries…" aria-label="Search">
+    <div id="tag-filters" class="tag-filters" aria-label="Filter by tag"></div>
+  </section>
+
+  <!-- TRIPS VIEW -->
+  <section id="trips-view" class="view">
+    <div class="view-header">
+      <h2>Trips</h2>
+      <button id="add-trip-btn" class="btn btn-primary">+ New Trip</button>
+    </div>
+
+    <div class="trip-section">
+      <h3>Upcoming</h3>
+      <div id="upcoming-trips" class="trip-grid"></div>
+      <p class="empty-note hidden" id="upcoming-empty">No upcoming trips yet. Plant a flag somewhere.</p>
+    </div>
+
+    <div class="trip-section">
+      <h3>Past</h3>
+      <div id="past-trips" class="trip-grid"></div>
+      <p class="empty-note hidden" id="past-empty">No past trips logged yet.</p>
     </div>
   </section>
 
-  <div id="recipe-categories" class="recipe-categories" aria-label="Recipe categories"></div>
-  <p id="no-results" class="no-results hidden">No recipes match your search.</p>
-
-  <section id="recipe-detail" class="recipe-detail hidden">
-    <div class="detail-header">
-      <div>
-        <h2 id="detail-title"></h2>
-        <p id="detail-desc" class="detail-desc"></p>
-      </div>
-      <button id="delete-recipe-btn" class="btn btn-danger hidden">Delete Recipe</button>
+  <!-- JOURNAL (BLOG FEED) VIEW -->
+  <section id="journal-view" class="view hidden">
+    <div class="view-header">
+      <h2>Journal</h2>
+      <button id="add-entry-btn" class="btn btn-primary">+ New Entry</button>
     </div>
+    <div id="journal-feed" class="journal-feed"></div>
+    <p class="empty-note hidden" id="journal-empty">No entries yet — write your first one.</p>
+  </section>
 
-    <div class="servings-control">
-      <label for="servings-input">Servings</label>
-      <div class="stepper">
-        <button id="servings-minus" type="button" aria-label="Decrease servings">−</button>
-        <input type="number" id="servings-input" min="0.25" step="0.25">
-        <button id="servings-plus" type="button" aria-label="Increase servings">+</button>
-      </div>
-      <span id="base-servings-note" class="base-note"></span>
-    </div>
-
-    <div class="detail-grid">
-      <div class="detail-col">
-        <h3>Ingredients</h3>
-        <ul id="ingredient-list" class="ingredient-list"></ul>
-
-        <h3>Instructions</h3>
-        <ol id="instruction-list" class="instruction-list"></ol>
-      </div>
-
-      <div class="detail-col">
-        <div class="nutrition-toggle">
-          <label><input type="radio" name="nutrition-mode" value="perServing" checked> Per Serving</label>
-          <label><input type="radio" name="nutrition-mode" value="total"> Whole Batch</label>
+  <!-- TRIP DETAIL VIEW -->
+  <section id="trip-detail-view" class="view hidden">
+    <button class="back-btn" data-back="trips">← All trips</button>
+    <article class="trip-detail">
+      <div class="trip-hero" id="trip-hero"></div>
+      <div class="trip-detail-header">
+        <div>
+          <span class="status-pill" id="trip-status-pill"></span>
+          <h2 id="trip-detail-name"></h2>
+          <p class="trip-detail-meta" id="trip-detail-meta"></p>
         </div>
-        <div id="nutrition-facts" class="nutrition-facts"></div>
+        <div class="trip-detail-actions">
+          <button id="edit-trip-btn" class="btn btn-secondary btn-small">Edit</button>
+          <button id="delete-trip-btn" class="btn btn-danger btn-small">Delete</button>
+        </div>
       </div>
-    </div>
+      <p class="trip-detail-summary" id="trip-detail-summary"></p>
+      <div class="tag-row" id="trip-detail-tags"></div>
+
+      <div class="trip-entries-header">
+        <h3>Entries</h3>
+        <button id="add-entry-for-trip-btn" class="btn btn-secondary btn-small">+ New Entry</button>
+      </div>
+      <div id="trip-entries-list" class="journal-feed"></div>
+      <p class="empty-note hidden" id="trip-entries-empty">No entries for this trip yet.</p>
+    </article>
   </section>
+
+  <!-- ENTRY READER VIEW -->
+  <section id="entry-reader-view" class="view hidden">
+    <button class="back-btn" id="entry-back-btn">← Back</button>
+    <article class="entry-reader">
+      <div class="entry-reader-header">
+        <h2 id="reader-title"></h2>
+        <div class="entry-reader-actions">
+          <button id="edit-entry-btn" class="btn btn-secondary btn-small">Edit</button>
+          <button id="delete-entry-btn" class="btn btn-danger btn-small">Delete</button>
+        </div>
+      </div>
+      <p class="entry-byline" id="reader-byline"></p>
+      <div class="tag-row" id="reader-tags"></div>
+      <div class="entry-photos" id="reader-photos"></div>
+      <div class="entry-body" id="reader-body"></div>
+    </article>
+  </section>
+
 </main>
 
-<!-- Add Recipe Modal -->
-<div id="recipe-modal" class="modal hidden">
+<!-- Trip Modal -->
+<div id="trip-modal" class="modal hidden">
   <div class="modal-content">
     <div class="modal-header">
-      <h2>Add Custom Recipe</h2>
-      <button id="close-recipe-modal" class="icon-btn" aria-label="Close">✕</button>
+      <h2 id="trip-modal-title">New Trip</h2>
+      <button class="icon-btn close-modal" data-close="trip-modal" aria-label="Close">✕</button>
     </div>
-    <form id="recipe-form">
-      <label>Recipe name
-        <input type="text" id="recipe-name-input" required>
+    <form id="trip-form">
+      <label>Trip name
+        <input type="text" id="trip-name-input" required placeholder="e.g. Kyoto in Autumn">
       </label>
       <div class="form-row">
-        <label>Base servings (as written)
-          <input type="number" id="recipe-servings-input" min="0.25" step="0.25" required>
+        <label>Destination
+          <input type="text" id="trip-destination-input" required placeholder="City">
         </label>
-        <label>Serving label
-          <input type="text" id="recipe-serving-label-input" placeholder="e.g. servings, cookies">
+        <label>Country
+          <input type="text" id="trip-country-input" placeholder="Country">
         </label>
       </div>
-      <label>Category
-        <input type="text" id="recipe-category-input" list="category-options" placeholder="e.g. Breakfast, Desserts & Sweets">
+      <div class="form-row">
+        <label>Start date
+          <input type="date" id="trip-start-input" required>
+        </label>
+        <label>End date
+          <input type="date" id="trip-end-input" required>
+        </label>
+      </div>
+      <label>Theme
+        <select id="trip-theme-input">
+          <option value="ocean">Ocean / coastal</option>
+          <option value="mountain">Mountain</option>
+          <option value="forest">Forest / temple</option>
+          <option value="desert">Desert</option>
+          <option value="city">City</option>
+          <option value="arctic">Arctic / snow</option>
+          <option value="tropical">Tropical</option>
+        </select>
       </label>
-      <datalist id="category-options"></datalist>
-
-      <h3>Ingredients</h3>
-      <datalist id="ingredient-options"></datalist>
-      <div id="ingredient-rows" class="ingredient-rows"></div>
-      <button type="button" id="add-ingredient-row-btn" class="btn btn-secondary btn-small">+ Add Ingredient Row</button>
-      <p class="hint">Type an ingredient name that matches one in the database (autocomplete will help). Need something new? Use "Add Ingredient to Database" first.</p>
-
-      <label>Instructions (one step per line)
-        <textarea id="recipe-instructions-input" rows="5"></textarea>
+      <label>Cover photo
+        <input type="file" id="trip-photo-input" accept="image/*">
       </label>
-
+      <div id="trip-photo-preview" class="photo-preview hidden"></div>
+      <label>Summary
+        <textarea id="trip-summary-input" rows="3" placeholder="A line or two about this trip"></textarea>
+      </label>
+      <label>Tags (comma separated)
+        <input type="text" id="trip-tags-input" placeholder="e.g. hiking, food, beaches">
+      </label>
       <div class="modal-actions">
-        <button type="button" id="cancel-recipe-btn" class="btn btn-secondary">Cancel</button>
-        <button type="submit" class="btn btn-primary">Save Recipe</button>
+        <button type="button" class="btn btn-secondary close-modal" data-close="trip-modal">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save Trip</button>
       </div>
     </form>
   </div>
 </div>
 
-<!-- Add Ingredient Modal -->
-<div id="ingredient-modal" class="modal hidden">
+<!-- Entry Modal -->
+<div id="entry-modal" class="modal hidden">
   <div class="modal-content">
     <div class="modal-header">
-      <h2>Add Ingredient to Database</h2>
-      <button id="close-ingredient-modal" class="icon-btn" aria-label="Close">✕</button>
+      <h2 id="entry-modal-title">New Entry</h2>
+      <button class="icon-btn close-modal" data-close="entry-modal" aria-label="Close">✕</button>
     </div>
-    <form id="ingredient-form">
-      <label>Ingredient name
-        <input type="text" id="new-ing-name" required>
+    <form id="entry-form">
+      <label>Trip
+        <select id="entry-trip-input">
+          <option value="">No trip (standalone note)</option>
+        </select>
       </label>
-
-      <h3>Nutrition per 100g</h3>
-      <div class="form-grid">
-        <label>Calories (kcal)<input type="number" id="new-ing-calories" step="any" min="0" value="0"></label>
-        <label>Protein (g)<input type="number" id="new-ing-protein" step="any" min="0" value="0"></label>
-        <label>Carbs (g)<input type="number" id="new-ing-carbs" step="any" min="0" value="0"></label>
-        <label>Fat (g)<input type="number" id="new-ing-fat" step="any" min="0" value="0"></label>
-        <label>Fiber (g)<input type="number" id="new-ing-fiber" step="any" min="0" value="0"></label>
-        <label>Sugar (g)<input type="number" id="new-ing-sugar" step="any" min="0" value="0"></label>
-        <label>Sodium (mg)<input type="number" id="new-ing-sodium" step="any" min="0" value="0"></label>
+      <div class="form-row">
+        <label>Title
+          <input type="text" id="entry-title-input" required placeholder="Give this entry a title">
+        </label>
+        <label>Date
+          <input type="date" id="entry-date-input" required>
+        </label>
       </div>
-
-      <h3>Optional: grams per measure</h3>
-      <p class="hint">Fill these in so the ingredient can be used with cup/tbsp/tsp/each measurements in recipes.</p>
-      <div class="form-grid">
-        <label>1 cup = ? g<input type="number" id="new-ing-unit-cup" step="any" min="0"></label>
-        <label>1 tbsp = ? g<input type="number" id="new-ing-unit-tbsp" step="any" min="0"></label>
-        <label>1 tsp = ? g<input type="number" id="new-ing-unit-tsp" step="any" min="0"></label>
-        <label>1 each = ? g<input type="number" id="new-ing-unit-each" step="any" min="0"></label>
+      <div class="form-row">
+        <label>Mood / icon
+          <input type="text" id="entry-mood-input" maxlength="4" placeholder="🍜">
+        </label>
+        <label>Tags (comma separated)
+          <input type="text" id="entry-tags-input" placeholder="e.g. food, hiking">
+        </label>
       </div>
-
+      <label>Photos
+        <input type="file" id="entry-photos-input" accept="image/*" multiple>
+      </label>
+      <div id="entry-photo-preview" class="photo-preview hidden"></div>
+      <label>Entry
+        <textarea id="entry-body-input" rows="10" required placeholder="Write it up — blog post, short story, quick note, whatever this one needs. Leave a blank line between paragraphs."></textarea>
+      </label>
       <div class="modal-actions">
-        <button type="button" id="cancel-ingredient-btn" class="btn btn-secondary">Cancel</button>
-        <button type="submit" class="btn btn-primary">Save Ingredient</button>
+        <button type="button" class="btn btn-secondary close-modal" data-close="entry-modal">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save Entry</button>
       </div>
     </form>
   </div>
