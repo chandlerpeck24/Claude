@@ -1,9 +1,8 @@
-# Recipe Calculator
+# Waypoint
 
-A browser-based calculator for cookbook recipes. Pick a recipe, set the
-number of servings you want to make, and every ingredient amount plus the
-full nutrition breakdown (calories, macros, and key nutrients) updates
-instantly — per serving or for the whole batch.
+A browser-based travel journal — a single place for trips you're planning,
+trips you've taken, and the notes, insights, photos, and blog-style stories
+that go with them.
 
 ## Running it
 
@@ -18,37 +17,48 @@ then visit `http://localhost:8000`.
 
 ## Features
 
-- **Serving-size scaling** — enter any serving count (supports fractional
-  servings) and every ingredient quantity scales proportionally, displayed
-  as friendly fractions (e.g. "1 1/2 cups").
-- **Live nutrition facts** — calories, protein, carbs, fat, fiber, sugar,
-  and sodium, shown per serving or for the whole batch.
-- **6 built-in recipes** spanning baking, breakfast, dinner, and snacks,
-  each backed by real ingredient-level nutrition data.
-- **~45-ingredient nutrition database** with per-100g nutrition and
-  kitchen-measure conversions (cup/tbsp/tsp/each/clove/stick) so amounts
-  in any common unit convert correctly.
-- **Add your own recipes** — build a recipe from ingredients already in the
-  database via the "+ Add Custom Recipe" form.
-- **Add your own ingredients** — for anything not in the database, add it
-  with its own per-100g nutrition and measure conversions via
-  "+ Add Ingredient to Database".
-- Custom recipes/ingredients persist in the browser (`localStorage`), so
-  they're still there next time you load the page.
+- **Trips, past and future** — every trip gets a status computed from its
+  dates: **Ongoing**, **Upcoming**, **Past**, or **Bucket List** (no dates
+  yet, for the "someday" ideas).
+- **Journal entries in blog/short-story format** — write entries with a
+  title, date, location, and free-form body text; paragraphs render with a
+  serif, story-like layout.
+- **Key insights** — a short bullet list on any entry for the practical
+  takeaways ("go before 7am to beat the crowds"), separate from the
+  narrative.
+- **Notes & Insights** — entries that aren't tied to a specific trip (gear
+  tips, packing philosophy, general travel wisdom) live in their own view.
+- **Photos** — attach photos to any entry or as a trip's cover image;
+  they're automatically downscaled and compressed in the browser before
+  being stored, and a dedicated "All Photos" view collects every photo
+  across every trip. Click any photo for a full-size lightbox view.
+- **Search** — a single search box filters across trip titles,
+  destinations, countries, tags, and entry text.
+- Everything persists in the browser (`localStorage`), so it's still there
+  next time you load the page.
+- Responsive layout with a collapsible sidebar on mobile, and a light/dark
+  theme that follows your system setting.
 
 ## Files
 
 - `index.html` — page structure and modals
-- `style.css` — styling (light/dark aware)
-- `data.js` — ingredient nutrition database and built-in recipes
-- `app.js` — scaling math, unit conversion, rendering, and custom
-  recipe/ingredient forms
+- `style.css` — styling (light/dark aware, responsive)
+- `data.js` — sample seed data (trips, entries, a country list) loaded on
+  first run only
+- `app.js` — state, rendering, image resizing, and all form/CRUD logic
 
-## How the math works
+## Data model
 
-Each recipe stores ingredient amounts for its original ("base") serving
-count. Scaling multiplies every ingredient quantity by
-`desiredServings / baseServings`. Each ingredient carries nutrition per
-100g plus gram weights for the units it's used in (e.g. 1 cup of flour =
-120g), so scaled quantities convert to grams and then to
-calories/macros/nutrients, summed across all ingredients.
+Two flat lists live in `localStorage`, keyed by `waypoint.v1`:
+
+- **Trips** — title, destination, country, optional start/end dates,
+  summary, tags, and an optional cover photo. Status (ongoing / upcoming /
+  past / bucket list) is derived from the dates rather than stored.
+- **Entries** — title, date, optional trip reference (blank = a general
+  note, not tied to any trip), location, a free-form body for the
+  journal/story text, a line-separated list of key insights, and any
+  number of photos.
+
+Photos are stored as compressed JPEG data URLs, resized client-side (max
+~1600px) via a canvas before being saved, to keep `localStorage` usage
+reasonable.
