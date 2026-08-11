@@ -1,519 +1,589 @@
 /* =========================================================================
-   Recipe Calculator — App Logic
+   Wayfarer — App Logic
    ========================================================================= */
 
-const NUTRIENT_KEYS = ["calories", "protein", "carbs", "fat", "fiber", "sugar", "sodium"];
-const NUTRIENT_LABELS = {
-  calories: "Calories", protein: "Protein", carbs: "Carbohydrates",
-  fat: "Fat", fiber: "Fiber", sugar: "Sugar", sodium: "Sodium"
-};
-const NUTRIENT_UNITS = {
-  calories: "kcal", protein: "g", carbs: "g", fat: "g", fiber: "g", sugar: "g", sodium: "mg"
-};
+const STORAGE_KEY = "wayfarer_journal_v1";
 
-const STORAGE_KEYS = { recipes: "rc_custom_recipes", ingredients: "rc_custom_ingredients" };
+const TYPE_LABELS = { blog: "📝 Blog Post", story: "📖 Short Story", note: "🗒️ Note", insight: "💡 Insight" };
+const EMOJI_CHOICES = ["🧭", "✈️", "🏔️", "🏖️", "🏯", "🌋", "🚂", "🏕️", "🚋", "⛰️", "🥝", "🗺️"];
+const STATUS_LABELS = { ongoing: "Happening now", upcoming: "Upcoming", past: "Past", idea: "Bucket list" };
+const STATUS_ORDER = ["ongoing", "upcoming", "past", "idea"];
 
-const CATEGORY_ORDER = [
-  "Breakfast", "Shots & Smoothies", "Food Synergy Meals", "Weight Loss", "Muscle Gain",
-  "Weight Gain", "Pasta & Italian", "Seafood", "Red Meat & Poultry", "Desserts & Sweets",
-  "Snacks & Dips", "Biblical Meals"
-];
-const DEFAULT_CATEGORY = "My Recipes";
+// ---- State -----------------------------------------------------------------
 
-// ---- State ---------------------------------------------------------------
+let state = { trips: [], entries: [] };
+let currentView = "trips";      // "trips" | "feed" | "tripDetail"
+let currentTripId = null;
+let editingTripId = null;       // set when trip modal is editing rather than creating
+let editingEntryId = null;      // set when entry modal is editing rather than creating
+let draftPhotos = [];           // photos attached in the currently-open entry form
 
-let ingredientDB = [];   // merged default + custom
-let recipeDB = [];       // merged default + custom
-let currentRecipeId = null;
-let currentServings = null;
-let ingredientRowCount = 0;
+// ---- Bootstrap ---------------------------------------------------------------
 
-// ---- Bootstrap -------------------------------------------------------------
-
-function loadCustomRecipes() {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEYS.recipes)) || []; }
-  catch (e) { return []; }
-}
-function loadCustomIngredients() {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEYS.ingredients)) || []; }
-  catch (e) { return []; }
-}
-function saveCustomRecipes(list) { localStorage.setItem(STORAGE_KEYS.recipes, JSON.stringify(list)); }
-function saveCustomIngredients(list) { localStorage.setItem(STORAGE_KEYS.ingredients, JSON.stringify(list)); }
-
-function rebuildDatabases() {
-  const customIngredients = loadCustomIngredients().map(i => ({ ...i, custom: true }));
-  const customRecipes = loadCustomRecipes().map(r => ({ ...r, custom: true }));
-  ingredientDB = [...INGREDIENTS, ...customIngredients];
-  recipeDB = [...RECIPES, ...customRecipes];
+function loadState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) { /* fall through to seed data */ }
+  return { trips: structuredClone(SEED_TRIPS), entries: structuredClone(SEED_ENTRIES) };
 }
 
-function getIngredient(id) { return ingredientDB.find(i => i.id === id); }
-function getRecipe(id) { return recipeDB.find(r => r.id === id); }
-
-// ---- Unit conversion & nutrition math --------------------------------------
-
-function gramsPerUnit(ingredient, unit) {
-  if (GLOBAL_UNITS_TO_GRAMS[unit] !== undefined) return GLOBAL_UNITS_TO_GRAMS[unit];
-  if (ingredient.units && ingredient.units[unit] !== undefined) return ingredient.units[unit];
-  return null;
+function saveState() {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
-function availableUnitsFor(ingredient) {
-  const specific = ingredient.units ? Object.keys(ingredient.units) : [];
-  return [...specific, ...Object.keys(GLOBAL_UNITS_TO_GRAMS)];
+function makeId(prefix) {
+  return `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 }
 
-function computeIngredientNutrition(ingredient, quantity, unit) {
-  const gpu = gramsPerUnit(ingredient, unit);
-  const grams = gpu === null ? 0 : quantity * gpu;
-  const factor = grams / 100;
-  const result = {};
-  NUTRIENT_KEYS.forEach(k => { result[k] = (ingredient.per100g[k] || 0) * factor; });
-  result._grams = grams;
-  return result;
+// ---- Date / status helpers ---------------------------------------------------
+
+function todayStr() {
+  return new Date().toISOString().slice(0, 10);
 }
 
-function emptyNutrition() {
-  const n = {};
-  NUTRIENT_KEYS.forEach(k => n[k] = 0);
-  return n;
+function tripStatus(trip) {
+  if (!trip.startDate) return "idea";
+  const today = todayStr();
+  const end = trip.endDate || trip.startDate;
+  if (end < today) return "past";
+  if (trip.startDate > today) return "upcoming";
+  return "ongoing";
 }
 
-function addNutrition(a, b) {
-  const n = {};
-  NUTRIENT_KEYS.forEach(k => n[k] = a[k] + b[k]);
-  return n;
+function formatDate(dateStr) {
+  if (!dateStr) return "";
+  const d = new Date(dateStr + "T00:00:00");
+  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
-// Convert a decimal to a friendly mixed-number fraction string (eighths).
-function formatQuantity(qty) {
-  if (qty === 0) return "0";
-  const whole = Math.floor(qty);
-  let frac = qty - whole;
-  const denominators = [2, 3, 4, 8];
-  let best = null;
-  for (const d of denominators) {
-    const numerator = Math.round(frac * d);
-    if (numerator === 0 || numerator === d) continue;
-    const g = gcd(numerator, d);
-    const err = Math.abs(frac - numerator / d);
-    if (best === null || err < best.err) best = { num: numerator / g, den: d / g, err };
+function formatDateRange(trip) {
+  if (!trip.startDate) return "Dates not set";
+  if (!trip.endDate || trip.endDate === trip.startDate) return formatDate(trip.startDate);
+  return `${formatDate(trip.startDate)} – ${formatDate(trip.endDate)}`;
+}
+
+function tagsToArray(str) {
+  return str.split(",").map(t => t.trim()).filter(Boolean);
+}
+
+function tripById(id) {
+  return state.trips.find(t => t.id === id);
+}
+
+function entriesForTrip(tripId) {
+  return state.entries.filter(e => e.tripId === tripId).sort((a, b) => a.date.localeCompare(b.date));
+}
+
+// ---- Search / filter ---------------------------------------------------------
+
+function matchesQuery(haystackParts, query) {
+  if (!query) return true;
+  const hay = haystackParts.filter(Boolean).join(" ").toLowerCase();
+  return hay.includes(query.toLowerCase());
+}
+
+function getFilters() {
+  return {
+    query: document.getElementById("search-input").value.trim(),
+    status: document.getElementById("status-filter").value
+  };
+}
+
+function tripMatchesFilters(trip, filters) {
+  if (filters.status !== "all" && tripStatus(trip) !== filters.status) return false;
+  if (!filters.query) return true;
+  const ownMatch = matchesQuery([trip.title, trip.destination, trip.summary, trip.notes, ...(trip.tags || [])], filters.query);
+  if (ownMatch) return true;
+  return entriesForTrip(trip.id).some(e => entryMatchesQuery(e, filters.query));
+}
+
+function entryMatchesQuery(entry, query) {
+  return matchesQuery([entry.title, entry.body, entry.location, ...(entry.tags || [])], query);
+}
+
+// ---- Rendering: Trips view ---------------------------------------------------
+
+function renderTripsView() {
+  const filters = getFilters();
+  const groups = document.getElementById("trip-groups");
+  groups.innerHTML = "";
+
+  let anyShown = false;
+  for (const status of STATUS_ORDER) {
+    const trips = state.trips
+      .filter(t => tripStatus(t) === status && tripMatchesFilters(t, filters))
+      .sort((a, b) => sortKeyForStatus(a, status).localeCompare(sortKeyForStatus(b, status)));
+    if (!trips.length) continue;
+    anyShown = true;
+
+    const section = document.createElement("div");
+    section.className = "trip-group";
+    section.innerHTML = `<h2 class="trip-group-title">${STATUS_LABELS[status]}</h2>`;
+    const cardWrap = document.createElement("div");
+    cardWrap.className = "trip-cards";
+    trips.forEach(trip => cardWrap.appendChild(renderTripCard(trip)));
+    section.appendChild(cardWrap);
+    groups.appendChild(section);
   }
-  // Fall back to decimal if fraction approximation is poor or qty is large/precise
-  if (best === null || best.err > 0.02) {
-    const rounded = Math.round(qty * 100) / 100;
-    return trimZero(rounded);
-  }
-  const fracStr = `${best.num}/${best.den}`;
-  return whole > 0 ? `${whole} ${fracStr}` : fracStr;
-}
-function trimZero(n) { return n % 1 === 0 ? String(n) : String(n); }
-function gcd(a, b) { return b === 0 ? a : gcd(b, a % b); }
 
-function pluralizeUnit(unit, qty) {
-  if (unit === "each") return "";
-  const noPlural = new Set(["g", "kg", "oz", "lb", "ml", "l"]);
-  if (noPlural.has(unit)) return unit;
-  if (qty === 1) return unit;
-  const irregular = { pinch: "pinches", dash: "dashes", leaf: "leaves", inch: "inches", loaf: "loaves" };
-  if (irregular[unit]) return irregular[unit];
-  return unit + "s";
+  document.getElementById("no-trip-results").classList.toggle("hidden", anyShown);
 }
 
-// ---- Rendering: Recipe categories ------------------------------------------
-
-function groupRecipesByCategory() {
-  const groups = new Map();
-  recipeDB.forEach(recipe => {
-    const cat = recipe.category || DEFAULT_CATEGORY;
-    if (!groups.has(cat)) groups.set(cat, []);
-    groups.get(cat).push(recipe);
-  });
-  const orderedNames = [
-    ...CATEGORY_ORDER.filter(c => groups.has(c)),
-    ...[...groups.keys()].filter(c => !CATEGORY_ORDER.includes(c)).sort()
-  ];
-  return orderedNames.map(name => ({ name, recipes: groups.get(name) }));
+function sortKeyForStatus(trip, status) {
+  if (status === "upcoming" || status === "ongoing") return trip.startDate || "9999";
+  if (status === "past") return trip.endDate ? `9999-${(9999 - Number(trip.endDate.slice(0,4))).toString().padStart(4,"0")}${trip.endDate.slice(4)}` : "0000";
+  return trip.title;
 }
 
-function buildRecipeCard(recipe) {
-  const card = document.createElement("button");
-  card.className = "recipe-card";
-  card.setAttribute("data-id", recipe.id);
-  const baseCals = computeRecipeTotals(recipe, recipe.baseServings).calories / recipe.baseServings;
+function renderTripCard(trip) {
+  const status = tripStatus(trip);
+  const card = document.createElement("div");
+  card.className = "trip-card";
+  card.addEventListener("click", () => openTripDetail(trip.id));
   card.innerHTML = `
-    <span class="recipe-emoji">${recipe.emoji || "🍽️"}</span>
-    <span class="recipe-name">${escapeHtml(recipe.name)}${recipe.custom ? ' <span class="badge">custom</span>' : ""}</span>
-    <span class="recipe-desc">${escapeHtml(truncate(recipe.description || "", 110))}</span>
-    <span class="recipe-meta">${recipe.baseServings} ${escapeHtml(recipe.servingLabel || "servings")} · ~${Math.round(baseCals)} kcal/serving</span>
-  `;
-  card.addEventListener("click", () => selectRecipe(recipe.id));
+    <div class="trip-card-banner status-${status}">${trip.emoji || "🧭"}</div>
+    <div class="trip-card-body">
+      <div class="trip-card-title">${escapeHtml(trip.title)}</div>
+      <div class="trip-card-dest">${escapeHtml(trip.destination)}</div>
+      <div class="trip-card-dates">${formatDateRange(trip)}</div>
+      <p class="trip-card-summary">${escapeHtml(trip.summary || "")}</p>
+      <div class="trip-card-foot">
+        <span class="status-badge status-${status}">${STATUS_LABELS[status]}</span>
+        <span class="entry-count">${entriesForTrip(trip.id).length} entries</span>
+      </div>
+    </div>`;
   return card;
 }
 
-function renderRecipeGrid() {
-  const container = document.getElementById("recipe-categories");
-  container.innerHTML = "";
-  const groups = groupRecipesByCategory();
-  groups.forEach(({ name, recipes }) => {
-    const details = document.createElement("details");
-    details.className = "category-group";
-    details.setAttribute("data-category", name);
+// ---- Rendering: Journal feed view --------------------------------------------
 
-    const summary = document.createElement("summary");
-    summary.innerHTML = `<span class="category-name">${escapeHtml(name)}</span><span class="category-count">${recipes.length}</span>`;
-    details.appendChild(summary);
+function renderFeedView() {
+  const filters = getFilters();
+  const feed = document.getElementById("entry-feed");
+  feed.innerHTML = "";
 
-    const grid = document.createElement("div");
-    grid.className = "recipe-grid";
-    recipes.forEach(recipe => grid.appendChild(buildRecipeCard(recipe)));
-    details.appendChild(grid);
+  const entries = state.entries
+    .filter(e => {
+      const trip = tripById(e.tripId);
+      if (!trip) return false;
+      if (filters.status !== "all" && tripStatus(trip) !== filters.status) return false;
+      if (!filters.query) return true;
+      return entryMatchesQuery(e, filters.query) || matchesQuery([trip.title, trip.destination], filters.query);
+    })
+    .sort((a, b) => b.date.localeCompare(a.date));
 
-    container.appendChild(details);
-  });
-  applySearchFilter(document.getElementById("search-input").value);
+  entries.forEach(entry => feed.appendChild(renderEntryCard(entry, { showTripLink: true })));
+  document.getElementById("no-feed-results").classList.toggle("hidden", entries.length > 0);
 }
 
-function applySearchFilter(query) {
-  const q = query.trim().toLowerCase();
-  const groups = document.querySelectorAll(".category-group");
-  let anyVisibleOverall = false;
-  groups.forEach(group => {
-    const cards = group.querySelectorAll(".recipe-card");
-    let anyVisible = false;
-    cards.forEach(card => {
-      const name = card.querySelector(".recipe-name").textContent.toLowerCase();
-      const match = !q || name.includes(q);
-      card.style.display = match ? "" : "none";
-      if (match) anyVisible = true;
+// ---- Rendering: shared entry card --------------------------------------------
+
+function renderEntryCard(entry, opts = {}) {
+  const trip = tripById(entry.tripId);
+  const card = document.createElement("article");
+  card.className = "entry-card";
+
+  const bodyHtml = entry.body.split(/\n\s*\n/).map(p => `<p>${escapeHtml(p).replace(/\n/g, "<br>")}</p>`).join("");
+  const tagsHtml = (entry.tags || []).map(t => `<span class="tag-chip">${escapeHtml(t)}</span>`).join("");
+  const metaBits = [formatDate(entry.date), entry.location].filter(Boolean);
+
+  card.innerHTML = `
+    <div class="entry-head">
+      <div class="entry-head-left">
+        ${opts.showTripLink && trip ? `<span class="entry-trip-link" data-trip-id="${trip.id}">${trip.emoji || ""} ${escapeHtml(trip.title)}</span>` : ""}
+        <span class="type-pill">${TYPE_LABELS[entry.type] || entry.type}</span>
+        <h3 class="entry-title">${escapeHtml(entry.title)}</h3>
+        <span class="entry-meta">${metaBits.map(escapeHtml).join(" · ")}</span>
+      </div>
+      <div class="entry-actions">
+        <button class="icon-btn edit-entry-btn" title="Edit entry" aria-label="Edit entry">✏️</button>
+      </div>
+    </div>
+    <div class="entry-body">${bodyHtml}</div>
+    ${entry.photos && entry.photos.length ? `<div class="photo-grid entry-photo-grid"></div>` : ""}
+    ${tagsHtml ? `<div class="entry-tags">${tagsHtml}</div>` : ""}
+  `;
+
+  if (entry.photos && entry.photos.length) {
+    const grid = card.querySelector(".entry-photo-grid");
+    entry.photos.forEach(photo => grid.appendChild(renderPhotoThumb(photo, entry.title)));
+  }
+
+  card.querySelector(".edit-entry-btn").addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    openEntryModal(entry.tripId, entry.id);
+  });
+  const tripLink = card.querySelector(".entry-trip-link");
+  if (tripLink) tripLink.addEventListener("click", () => openTripDetail(trip.id));
+
+  return card;
+}
+
+function renderPhotoThumb(photo, altText) {
+  const div = document.createElement("div");
+  div.className = "photo-thumb";
+  div.innerHTML = `<img src="${photo.dataUrl}" alt="${escapeHtml(photo.caption || altText || "")}">`;
+  div.querySelector("img").addEventListener("click", () => openLightbox(photo.dataUrl, photo.caption || ""));
+  return div;
+}
+
+// ---- Rendering: Trip detail ---------------------------------------------------
+
+function openTripDetail(tripId) {
+  currentTripId = tripId;
+  currentView = "tripDetail";
+  renderTripDetail();
+  setActiveView();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function renderTripDetail() {
+  const trip = tripById(currentTripId);
+  if (!trip) { closeTripDetail(); return; }
+  const status = tripStatus(trip);
+
+  const hero = document.getElementById("trip-hero");
+  hero.className = `trip-hero status-${status}`;
+  hero.style.background = heroBackground(status);
+  const tagsHtml = (trip.tags || []).map(t => `<span class="tag-chip">${escapeHtml(t)}</span>`).join("");
+  hero.innerHTML = `
+    <div>
+      <div class="trip-hero-title">${trip.emoji || "🧭"} ${escapeHtml(trip.title)}</div>
+      <div class="trip-hero-dest">${escapeHtml(trip.destination)} · <span class="status-badge status-${status}" style="background:rgba(255,255,255,0.18);border-color:rgba(255,255,255,0.4);color:#fdfcf6;">${STATUS_LABELS[status]}</span></div>
+      <div class="trip-hero-dates">${formatDateRange(trip)}</div>
+      ${trip.summary ? `<p class="trip-hero-summary">${escapeHtml(trip.summary)}</p>` : ""}
+      ${tagsHtml ? `<div class="trip-hero-tags">${tagsHtml}</div>` : ""}
+    </div>
+    <div class="trip-hero-actions">
+      <button class="btn btn-secondary btn-small" id="edit-trip-btn">Edit Trip</button>
+    </div>
+  `;
+  document.getElementById("edit-trip-btn").addEventListener("click", () => openTripModal(trip.id));
+
+  document.getElementById("trip-notes-text").textContent = trip.notes || "";
+  document.getElementById("trip-notes-text").classList.toggle("hidden", !trip.notes);
+  document.getElementById("trip-notes-empty").classList.toggle("hidden", !!trip.notes);
+  document.getElementById("edit-trip-notes-btn").onclick = () => openTripModal(trip.id);
+
+  const entries = entriesForTrip(trip.id);
+  const photoCard = document.getElementById("trip-photos-card");
+  const allPhotos = entries.flatMap(e => (e.photos || []).map(p => ({ photo: p, entry: e })));
+  photoCard.classList.toggle("hidden", allPhotos.length === 0);
+  const photoGrid = document.getElementById("trip-photo-grid");
+  photoGrid.innerHTML = "";
+  allPhotos.forEach(({ photo, entry }) => photoGrid.appendChild(renderPhotoThumb(photo, entry.title)));
+
+  const list = document.getElementById("trip-entry-list");
+  list.innerHTML = "";
+  entries.slice().reverse().forEach(entry => list.appendChild(renderEntryCard(entry, { showTripLink: false })));
+  document.getElementById("no-entries").classList.toggle("hidden", entries.length > 0);
+}
+
+function heroBackground(status) {
+  const gradients = {
+    ongoing: "linear-gradient(135deg, var(--accent), #4a8a83)",
+    upcoming: "linear-gradient(135deg, var(--gold), #d6ab52)",
+    past: "linear-gradient(135deg, var(--stamp), #c76a4f)",
+    idea: "linear-gradient(135deg, #8a8371, #a9a18c)"
+  };
+  return gradients[status] || gradients.idea;
+}
+
+function closeTripDetail() {
+  currentTripId = null;
+  currentView = "trips";
+  setActiveView();
+  renderTripsView();
+}
+
+// ---- View switching -----------------------------------------------------------
+
+function setActiveView() {
+  document.getElementById("trips-view").classList.toggle("hidden", currentView !== "trips");
+  document.getElementById("feed-view").classList.toggle("hidden", currentView !== "feed");
+  document.getElementById("trip-detail").classList.toggle("hidden", currentView !== "tripDetail");
+  document.getElementById("view-trips-btn").classList.toggle("active", currentView === "trips");
+  document.getElementById("view-feed-btn").classList.toggle("active", currentView === "feed");
+}
+
+function rerenderCurrentView() {
+  if (currentView === "trips") renderTripsView();
+  else if (currentView === "feed") renderFeedView();
+  else if (currentView === "tripDetail") renderTripDetail();
+}
+
+// ---- Trip modal ---------------------------------------------------------------
+
+function renderEmojiPicker(selected) {
+  const wrap = document.getElementById("emoji-picker");
+  wrap.innerHTML = "";
+  EMOJI_CHOICES.forEach(emoji => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "emoji-option" + (emoji === selected ? " selected" : "");
+    btn.textContent = emoji;
+    btn.addEventListener("click", () => {
+      document.getElementById("trip-emoji-input").value = emoji;
+      wrap.querySelectorAll(".emoji-option").forEach(b => b.classList.remove("selected"));
+      btn.classList.add("selected");
     });
-    group.style.display = anyVisible ? "" : "none";
-    group.open = q ? anyVisible : false;
-    if (anyVisible) anyVisibleOverall = true;
+    wrap.appendChild(btn);
   });
-  document.getElementById("no-results").classList.toggle("hidden", !q || anyVisibleOverall);
 }
 
-function expandAllCategories(open) {
-  document.querySelectorAll(".category-group").forEach(g => { g.open = open; });
+function openTripModal(tripId) {
+  editingTripId = tripId || null;
+  const trip = tripId ? tripById(tripId) : null;
+
+  document.getElementById("trip-modal-title").textContent = trip ? "Edit Trip" : "New Trip";
+  document.getElementById("trip-title-input").value = trip ? trip.title : "";
+  document.getElementById("trip-destination-input").value = trip ? trip.destination : "";
+  document.getElementById("trip-start-input").value = trip ? (trip.startDate || "") : "";
+  document.getElementById("trip-end-input").value = trip ? (trip.endDate || "") : "";
+  document.getElementById("trip-summary-input").value = trip ? trip.summary || "" : "";
+  document.getElementById("trip-notes-input").value = trip ? trip.notes || "" : "";
+  document.getElementById("trip-tags-input").value = trip ? (trip.tags || []).join(", ") : "";
+  document.getElementById("trip-emoji-input").value = trip ? (trip.emoji || "🧭") : "🧭";
+  renderEmojiPicker(document.getElementById("trip-emoji-input").value);
+  document.getElementById("delete-trip-btn").classList.toggle("hidden", !trip);
+
+  document.getElementById("trip-modal").classList.remove("hidden");
 }
 
-function truncate(str, maxLen) {
-  if (str.length <= maxLen) return str;
-  const cut = str.slice(0, maxLen);
-  const lastSpace = cut.lastIndexOf(" ");
-  return (lastSpace > 0 ? cut.slice(0, lastSpace) : cut).trim() + "…";
+function closeTripModal() {
+  document.getElementById("trip-modal").classList.add("hidden");
+  editingTripId = null;
 }
+
+function handleTripFormSubmit(ev) {
+  ev.preventDefault();
+  const startDate = document.getElementById("trip-start-input").value || null;
+  const endDate = document.getElementById("trip-end-input").value || null;
+  if (startDate && endDate && endDate < startDate) {
+    alert("End date can't be before the start date.");
+    return;
+  }
+
+  const payload = {
+    title: document.getElementById("trip-title-input").value.trim(),
+    destination: document.getElementById("trip-destination-input").value.trim(),
+    emoji: document.getElementById("trip-emoji-input").value || "🧭",
+    startDate,
+    endDate: startDate ? endDate : null,
+    summary: document.getElementById("trip-summary-input").value.trim(),
+    notes: document.getElementById("trip-notes-input").value.trim(),
+    tags: tagsToArray(document.getElementById("trip-tags-input").value)
+  };
+
+  if (editingTripId) {
+    Object.assign(tripById(editingTripId), payload);
+  } else {
+    state.trips.push({ id: makeId("t"), ...payload });
+  }
+  saveState();
+  closeTripModal();
+  rerenderCurrentView();
+  if (currentView === "tripDetail") renderTripDetail();
+}
+
+function handleDeleteTrip() {
+  if (!editingTripId) return;
+  const deletedTripId = editingTripId;
+  const trip = tripById(deletedTripId);
+  if (!confirm(`Delete "${trip.title}" and all of its journal entries? This can't be undone.`)) return;
+  state.trips = state.trips.filter(t => t.id !== deletedTripId);
+  state.entries = state.entries.filter(e => e.tripId !== deletedTripId);
+  saveState();
+  closeTripModal();
+  if (currentView === "tripDetail" && currentTripId === deletedTripId) closeTripDetail();
+  else rerenderCurrentView();
+}
+
+// ---- Entry modal ----------------------------------------------------------------
+
+function populateTripSelect(selectedTripId) {
+  const select = document.getElementById("entry-trip-input");
+  select.innerHTML = "";
+  state.trips
+    .slice()
+    .sort((a, b) => a.title.localeCompare(b.title))
+    .forEach(trip => {
+      const opt = document.createElement("option");
+      opt.value = trip.id;
+      opt.textContent = `${trip.emoji || ""} ${trip.title}`;
+      select.appendChild(opt);
+    });
+  if (selectedTripId) select.value = selectedTripId;
+}
+
+function renderPhotoDraftPreview() {
+  const grid = document.getElementById("entry-photo-preview");
+  grid.innerHTML = "";
+  draftPhotos.forEach((photo, idx) => {
+    const thumb = renderPhotoThumb(photo, "");
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "photo-thumb-remove";
+    removeBtn.textContent = "✕";
+    removeBtn.addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      draftPhotos.splice(idx, 1);
+      renderPhotoDraftPreview();
+    });
+    thumb.appendChild(removeBtn);
+    grid.appendChild(thumb);
+  });
+}
+
+function openEntryModal(tripId, entryId) {
+  editingEntryId = entryId || null;
+  const entry = entryId ? state.entries.find(e => e.id === entryId) : null;
+  draftPhotos = entry ? structuredClone(entry.photos || []) : [];
+
+  document.getElementById("entry-modal-title").textContent = entry ? "Edit Journal Entry" : "New Journal Entry";
+  populateTripSelect(entry ? entry.tripId : tripId);
+  document.getElementById("entry-type-input").value = entry ? entry.type : "blog";
+  document.getElementById("entry-title-input").value = entry ? entry.title : "";
+  document.getElementById("entry-date-input").value = entry ? entry.date : todayStr();
+  document.getElementById("entry-location-input").value = entry ? entry.location || "" : "";
+  document.getElementById("entry-body-input").value = entry ? entry.body : "";
+  document.getElementById("entry-tags-input").value = entry ? (entry.tags || []).join(", ") : "";
+  document.getElementById("entry-photo-input").value = "";
+  document.getElementById("delete-entry-btn").classList.toggle("hidden", !entry);
+  renderPhotoDraftPreview();
+
+  document.getElementById("entry-modal").classList.remove("hidden");
+}
+
+function closeEntryModal() {
+  document.getElementById("entry-modal").classList.add("hidden");
+  editingEntryId = null;
+  draftPhotos = [];
+}
+
+// Resize/compress an image file client-side before storing it as a data URL,
+// since localStorage has a small (~5MB) quota shared across the whole app.
+function readAndResizeImage(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = reject;
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = reject;
+      img.onload = () => {
+        const maxDim = 1400;
+        const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        canvas.getContext("2d").drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.82));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+async function handlePhotoInputChange(ev) {
+  const files = Array.from(ev.target.files || []);
+  for (const file of files) {
+    try {
+      const dataUrl = await readAndResizeImage(file);
+      draftPhotos.push({ dataUrl, caption: "" });
+    } catch (e) { /* skip files that fail to load */ }
+  }
+  renderPhotoDraftPreview();
+  ev.target.value = "";
+}
+
+function handleEntryFormSubmit(ev) {
+  ev.preventDefault();
+  const payload = {
+    tripId: document.getElementById("entry-trip-input").value,
+    type: document.getElementById("entry-type-input").value,
+    title: document.getElementById("entry-title-input").value.trim(),
+    date: document.getElementById("entry-date-input").value,
+    location: document.getElementById("entry-location-input").value.trim(),
+    body: document.getElementById("entry-body-input").value.trim(),
+    tags: tagsToArray(document.getElementById("entry-tags-input").value),
+    photos: draftPhotos
+  };
+
+  if (editingEntryId) {
+    Object.assign(state.entries.find(e => e.id === editingEntryId), payload);
+  } else {
+    state.entries.push({ id: makeId("e"), ...payload });
+  }
+  saveState();
+  closeEntryModal();
+  rerenderCurrentView();
+  if (currentView === "tripDetail") renderTripDetail();
+}
+
+function handleDeleteEntry() {
+  if (!editingEntryId) return;
+  if (!confirm("Delete this journal entry? This can't be undone.")) return;
+  state.entries = state.entries.filter(e => e.id !== editingEntryId);
+  saveState();
+  closeEntryModal();
+  rerenderCurrentView();
+  if (currentView === "tripDetail") renderTripDetail();
+}
+
+// ---- Lightbox -----------------------------------------------------------------
+
+function openLightbox(dataUrl, caption) {
+  document.getElementById("lightbox-img").src = dataUrl;
+  document.getElementById("lightbox-caption").textContent = caption || "";
+  document.getElementById("lightbox").classList.remove("hidden");
+}
+function closeLightbox() {
+  document.getElementById("lightbox").classList.add("hidden");
+  document.getElementById("lightbox-img").src = "";
+}
+
+// ---- Misc helpers ---------------------------------------------------------------
 
 function escapeHtml(str) {
-  const div = document.createElement("div");
-  div.textContent = str;
-  return div.innerHTML;
+  return String(str ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
-// ---- Recipe detail & calculator -------------------------------------------
-
-function selectRecipe(id) {
-  currentRecipeId = id;
-  const recipe = getRecipe(id);
-  currentServings = recipe.baseServings;
-  document.querySelectorAll(".recipe-card").forEach(c => {
-    c.classList.toggle("active", c.getAttribute("data-id") === id);
-  });
-  renderRecipeDetail();
-  document.getElementById("recipe-detail").scrollIntoView({ behavior: "smooth", block: "nearest" });
-}
-
-function computeRecipeTotals(recipe, servings) {
-  const factor = servings / recipe.baseServings;
-  let total = emptyNutrition();
-  recipe.ingredients.forEach(item => {
-    const ingredient = getIngredient(item.id);
-    if (!ingredient) return;
-    const scaledQty = item.quantity * factor;
-    const n = computeIngredientNutrition(ingredient, scaledQty, item.unit);
-    total = addNutrition(total, n);
-  });
-  return total;
-}
-
-function renderRecipeDetail() {
-  const recipe = getRecipe(currentRecipeId);
-  const container = document.getElementById("recipe-detail");
-  if (!recipe) { container.classList.add("hidden"); return; }
-  container.classList.remove("hidden");
-
-  const factor = currentServings / recipe.baseServings;
-
-  document.getElementById("detail-title").textContent = `${recipe.emoji || ""} ${recipe.name}`;
-  document.getElementById("detail-desc").textContent = recipe.description || "";
-  document.getElementById("servings-input").value = currentServings;
-  document.getElementById("base-servings-note").textContent =
-    `Original recipe makes ${recipe.baseServings} ${recipe.servingLabel || "servings"}`;
-
-  // Ingredients
-  const list = document.getElementById("ingredient-list");
-  list.innerHTML = "";
-  recipe.ingredients.forEach(item => {
-    const ingredient = getIngredient(item.id);
-    const li = document.createElement("li");
-    if (!ingredient) {
-      li.textContent = `${item.quantity} ${item.unit} (unknown ingredient: ${item.id})`;
-      list.appendChild(li);
-      return;
-    }
-    const scaledQty = item.quantity * factor;
-    const unitLabel = pluralizeUnit(item.unit, scaledQty);
-    li.innerHTML = `<span class="qty">${formatQuantity(scaledQty)}${unitLabel ? " " + unitLabel : ""}</span>
-                     <span class="ing-name">${escapeHtml(ingredient.name)}</span>`;
-    list.appendChild(li);
-  });
-
-  // Instructions
-  const steps = document.getElementById("instruction-list");
-  steps.innerHTML = "";
-  (recipe.instructions || []).forEach(step => {
-    const li = document.createElement("li");
-    li.textContent = step;
-    steps.appendChild(li);
-  });
-
-  // Nutrition
-  renderNutrition(recipe);
-
-  // Delete button only for custom recipes
-  const delBtn = document.getElementById("delete-recipe-btn");
-  delBtn.classList.toggle("hidden", !recipe.custom);
-}
-
-function renderNutrition(recipe) {
-  const total = computeRecipeTotals(recipe, currentServings);
-  const perServing = {};
-  NUTRIENT_KEYS.forEach(k => perServing[k] = total[k] / currentServings);
-
-  const mode = document.querySelector('input[name="nutrition-mode"]:checked').value;
-  const data = mode === "total" ? total : perServing;
-
-  const box = document.getElementById("nutrition-facts");
-  box.innerHTML = `
-    <h3>Nutrition Facts</h3>
-    <div class="nutrition-sub">${mode === "total"
-      ? `Whole batch — ${currentServings} ${recipe.servingLabel || "servings"}`
-      : `Per serving`}</div>
-    <div class="nutrition-calories">
-      <span>Calories</span>
-      <span>${Math.round(data.calories)}</span>
-    </div>
-    <div class="nutrition-divider"></div>
-    ${NUTRIENT_KEYS.filter(k => k !== "calories").map(k => `
-      <div class="nutrition-row">
-        <span>${NUTRIENT_LABELS[k]}</span>
-        <span>${formatNutrientValue(data[k])} ${NUTRIENT_UNITS[k]}</span>
-      </div>
-    `).join("")}
-  `;
-}
-
-function formatNutrientValue(v) {
-  if (v >= 100) return Math.round(v);
-  return Math.round(v * 10) / 10;
-}
-
-// ---- Servings controls ------------------------------------------------
-
-function setServings(val) {
-  const n = Math.max(0.25, Number(val) || 1);
-  currentServings = Math.round(n * 4) / 4; // quarter-serving precision
-  renderRecipeDetail();
-}
-
-// ---- Custom recipe builder -------------------------------------------
-
-function openRecipeModal() {
-  document.getElementById("recipe-modal").classList.remove("hidden");
-  document.getElementById("ingredient-rows").innerHTML = "";
-  document.getElementById("recipe-form").reset();
-  ingredientRowCount = 0;
-  addIngredientRow();
-  refreshIngredientDatalist();
-  refreshCategoryDatalist();
-}
-
-function refreshCategoryDatalist() {
-  const dl = document.getElementById("category-options");
-  const names = groupRecipesByCategory().map(g => g.name);
-  dl.innerHTML = names.map(n => `<option value="${escapeHtml(n)}">`).join("");
-}
-function closeRecipeModal() {
-  document.getElementById("recipe-modal").classList.add("hidden");
-}
-
-function refreshIngredientDatalist() {
-  const dl = document.getElementById("ingredient-options");
-  dl.innerHTML = ingredientDB.map(i => `<option value="${escapeHtml(i.name)}">`).join("");
-}
-
-function addIngredientRow(prefill) {
-  ingredientRowCount++;
-  const rowId = `ing-row-${ingredientRowCount}`;
-  const wrapper = document.createElement("div");
-  wrapper.className = "ingredient-row";
-  wrapper.id = rowId;
-  wrapper.innerHTML = `
-    <input type="text" class="ing-name-input" list="ingredient-options" placeholder="Ingredient name" required value="${prefill ? escapeHtml(prefill.name) : ""}">
-    <input type="number" class="ing-qty-input" step="any" min="0" placeholder="Qty" required value="${prefill ? prefill.quantity : ""}">
-    <select class="ing-unit-input"></select>
-    <button type="button" class="remove-row-btn" title="Remove ingredient">✕</button>
-  `;
-  document.getElementById("ingredient-rows").appendChild(wrapper);
-  populateUnitSelect(wrapper.querySelector(".ing-unit-input"), prefill ? prefill.unit : null);
-  wrapper.querySelector(".remove-row-btn").addEventListener("click", () => wrapper.remove());
-}
-
-function populateUnitSelect(select, selected) {
-  const units = ["g", "kg", "oz", "lb", "ml", "l", "cup", "tbsp", "tsp", "each", "clove", "stick"];
-  select.innerHTML = units.map(u => `<option value="${u}">${u}</option>`).join("");
-  if (selected) select.value = selected;
-}
-
-function handleSaveRecipe(e) {
-  e.preventDefault();
-  const name = document.getElementById("recipe-name-input").value.trim();
-  const baseServings = Number(document.getElementById("recipe-servings-input").value);
-  const servingLabel = document.getElementById("recipe-serving-label-input").value.trim() || "servings";
-  const category = document.getElementById("recipe-category-input").value.trim() || DEFAULT_CATEGORY;
-  const instructionsRaw = document.getElementById("recipe-instructions-input").value.trim();
-  const instructions = instructionsRaw ? instructionsRaw.split("\n").map(s => s.trim()).filter(Boolean) : [];
-
-  if (!name || !baseServings || baseServings <= 0) {
-    alert("Please provide a recipe name and a valid serving size.");
-    return;
-  }
-
-  const rows = document.querySelectorAll("#ingredient-rows .ingredient-row");
-  const ingredients = [];
-  let hasUnknown = false;
-  rows.forEach(row => {
-    const ingName = row.querySelector(".ing-name-input").value.trim();
-    const qty = Number(row.querySelector(".ing-qty-input").value);
-    const unit = row.querySelector(".ing-unit-input").value;
-    if (!ingName || !qty) return;
-    const match = ingredientDB.find(i => i.name.toLowerCase() === ingName.toLowerCase());
-    if (match) {
-      ingredients.push({ id: match.id, quantity: qty, unit });
-    } else {
-      hasUnknown = true;
-    }
-  });
-
-  if (ingredients.length === 0) {
-    alert(hasUnknown
-      ? "None of the ingredients matched the database. Add unknown ingredients first via 'Add Ingredient to Database'."
-      : "Please add at least one ingredient.");
-    return;
-  }
-  if (hasUnknown) {
-    const proceed = confirm("Some ingredients weren't found in the database and will be skipped. Continue anyway?");
-    if (!proceed) return;
-  }
-
-  const id = "custom_" + name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") + "_" + Date.now();
-  const recipe = { id, name, baseServings, servingLabel, category, ingredients, instructions, emoji: "📝",
-    description: "Your custom recipe" };
-
-  const custom = loadCustomRecipes();
-  custom.push(recipe);
-  saveCustomRecipes(custom);
-  rebuildDatabases();
-  renderRecipeGrid();
-  closeRecipeModal();
-  selectRecipe(id);
-}
-
-function handleDeleteRecipe() {
-  const recipe = getRecipe(currentRecipeId);
-  if (!recipe || !recipe.custom) return;
-  if (!confirm(`Delete "${recipe.name}"? This cannot be undone.`)) return;
-  const custom = loadCustomRecipes().filter(r => r.id !== recipe.id);
-  saveCustomRecipes(custom);
-  rebuildDatabases();
-  currentRecipeId = null;
-  document.getElementById("recipe-detail").classList.add("hidden");
-  renderRecipeGrid();
-}
-
-// ---- Custom ingredient builder -----------------------------------------
-
-function openIngredientModal() {
-  document.getElementById("ingredient-modal").classList.remove("hidden");
-  document.getElementById("ingredient-form").reset();
-}
-function closeIngredientModal() {
-  document.getElementById("ingredient-modal").classList.add("hidden");
-}
-
-function handleSaveIngredient(e) {
-  e.preventDefault();
-  const name = document.getElementById("new-ing-name").value.trim();
-  if (!name) return;
-  const id = "custom_" + name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") + "_" + Date.now();
-
-  const per100g = {};
-  NUTRIENT_KEYS.forEach(k => {
-    const el = document.getElementById(`new-ing-${k}`);
-    per100g[k] = Number(el.value) || 0;
-  });
-
-  const units = {};
-  ["cup", "tbsp", "tsp", "each"].forEach(u => {
-    const el = document.getElementById(`new-ing-unit-${u}`);
-    const val = Number(el.value);
-    if (val > 0) units[u] = val;
-  });
-
-  const ingredient = { id, name, category: "Custom", per100g, units };
-  const custom = loadCustomIngredients();
-  custom.push(ingredient);
-  saveCustomIngredients(custom);
-  rebuildDatabases();
-  refreshIngredientDatalist();
-  closeIngredientModal();
-  alert(`"${name}" added to your ingredient database. You can now use it in a recipe.`);
-}
-
-// ---- Wiring ---------------------------------------------------------------
+// ---- Wire up events ---------------------------------------------------------------
 
 function init() {
-  rebuildDatabases();
-  renderRecipeGrid();
+  state = loadState();
 
-  document.getElementById("servings-input").addEventListener("input", e => setServings(e.target.value));
-  document.getElementById("servings-minus").addEventListener("click", () => {
-    setServings(currentServings - 1);
+  document.getElementById("search-input").addEventListener("input", rerenderCurrentView);
+  document.getElementById("status-filter").addEventListener("change", rerenderCurrentView);
+
+  document.getElementById("view-trips-btn").addEventListener("click", () => { currentView = "trips"; setActiveView(); renderTripsView(); });
+  document.getElementById("view-feed-btn").addEventListener("click", () => { currentView = "feed"; setActiveView(); renderFeedView(); });
+  document.getElementById("back-to-trips-btn").addEventListener("click", closeTripDetail);
+
+  document.getElementById("add-trip-btn").addEventListener("click", () => openTripModal());
+  document.getElementById("close-trip-modal").addEventListener("click", closeTripModal);
+  document.getElementById("cancel-trip-btn").addEventListener("click", closeTripModal);
+  document.getElementById("trip-form").addEventListener("submit", handleTripFormSubmit);
+  document.getElementById("delete-trip-btn").addEventListener("click", handleDeleteTrip);
+
+  document.getElementById("add-entry-btn").addEventListener("click", () => openEntryModal(currentTripId));
+  document.getElementById("close-entry-modal").addEventListener("click", closeEntryModal);
+  document.getElementById("cancel-entry-btn").addEventListener("click", closeEntryModal);
+  document.getElementById("entry-form").addEventListener("submit", handleEntryFormSubmit);
+  document.getElementById("delete-entry-btn").addEventListener("click", handleDeleteEntry);
+  document.getElementById("entry-photo-input").addEventListener("change", handlePhotoInputChange);
+
+  document.getElementById("lightbox-close").addEventListener("click", closeLightbox);
+  document.getElementById("lightbox").addEventListener("click", (ev) => { if (ev.target.id === "lightbox") closeLightbox(); });
+
+  [document.getElementById("trip-modal"), document.getElementById("entry-modal")].forEach(modal => {
+    modal.addEventListener("click", (ev) => { if (ev.target === modal) modal.classList.add("hidden"); });
   });
-  document.getElementById("servings-plus").addEventListener("click", () => {
-    setServings(currentServings + 1);
-  });
-  document.querySelectorAll('input[name="nutrition-mode"]').forEach(r =>
-    r.addEventListener("change", () => renderRecipeDetail())
-  );
 
-  document.getElementById("add-recipe-btn").addEventListener("click", openRecipeModal);
-  document.getElementById("close-recipe-modal").addEventListener("click", closeRecipeModal);
-  document.getElementById("cancel-recipe-btn").addEventListener("click", closeRecipeModal);
-  document.getElementById("recipe-form").addEventListener("submit", handleSaveRecipe);
-  document.getElementById("add-ingredient-row-btn").addEventListener("click", () => addIngredientRow());
-  document.getElementById("delete-recipe-btn").addEventListener("click", handleDeleteRecipe);
-
-  document.getElementById("add-ingredient-btn").addEventListener("click", openIngredientModal);
-  document.getElementById("close-ingredient-modal").addEventListener("click", closeIngredientModal);
-  document.getElementById("cancel-ingredient-btn").addEventListener("click", closeIngredientModal);
-  document.getElementById("ingredient-form").addEventListener("submit", handleSaveIngredient);
-
-  document.getElementById("search-input").addEventListener("input", e => applySearchFilter(e.target.value));
-  document.getElementById("expand-all-btn").addEventListener("click", () => expandAllCategories(true));
-  document.getElementById("collapse-all-btn").addEventListener("click", () => expandAllCategories(false));
+  setActiveView();
+  renderTripsView();
 }
 
 document.addEventListener("DOMContentLoaded", init);

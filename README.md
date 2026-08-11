@@ -1,9 +1,8 @@
-# Recipe Calculator
+# Wayfarer — Travel Journal
 
-A browser-based calculator for cookbook recipes. Pick a recipe, set the
-number of servings you want to make, and every ingredient amount plus the
-full nutrition breakdown (calories, macros, and key nutrients) updates
-instantly — per serving or for the whole batch.
+A browser-based travel journal for keeping past and future trips, planning
+notes, insights, photos, and journal entries (blog posts or short stories)
+all in one place.
 
 ## Running it
 
@@ -18,37 +17,43 @@ then visit `http://localhost:8000`.
 
 ## Features
 
-- **Serving-size scaling** — enter any serving count (supports fractional
-  servings) and every ingredient quantity scales proportionally, displayed
-  as friendly fractions (e.g. "1 1/2 cups").
-- **Live nutrition facts** — calories, protein, carbs, fat, fiber, sugar,
-  and sodium, shown per serving or for the whole batch.
-- **6 built-in recipes** spanning baking, breakfast, dinner, and snacks,
-  each backed by real ingredient-level nutrition data.
-- **~45-ingredient nutrition database** with per-100g nutrition and
-  kitchen-measure conversions (cup/tbsp/tsp/each/clove/stick) so amounts
-  in any common unit convert correctly.
-- **Add your own recipes** — build a recipe from ingredients already in the
-  database via the "+ Add Custom Recipe" form.
-- **Add your own ingredients** — for anything not in the database, add it
-  with its own per-100g nutrition and measure conversions via
-  "+ Add Ingredient to Database".
-- Custom recipes/ingredients persist in the browser (`localStorage`), so
-  they're still there next time you load the page.
+- **Trips, automatically grouped** into Happening Now, Upcoming, Past, and
+  Bucket List, based on the start/end dates you give each trip (leave dates
+  blank for a someday/bucket-list idea).
+- **Journal entries per trip** in four flavors — Blog Post, Short Story,
+  Note, or Insight — so a day's write-up, a bit of fiction, a packing list,
+  and a lesson learned can all live side by side.
+- **Journal Feed** — every entry across every trip, newest first, with the
+  same search and status filtering as the Trips view.
+- **Trip-level notes & insights** for planning tips, lessons learned, and
+  things to remember next time, separate from the day-by-day entries.
+- **Photos** — attach images to any entry; they're resized client-side and
+  stored as part of the entry, then aggregated into a per-trip photo
+  gallery. Click any photo for a full-size lightbox view.
+- **Search and filter** across trip titles, destinations, notes, entry text,
+  locations, and tags.
+- Everything persists in the browser (`localStorage`), including edits to
+  the built-in sample trips — there's no server or account involved.
+- Seeded with 6 sample trips (past, upcoming, and one bucket-list idea) and
+  14 journal entries so the app isn't empty on first load; all of it is
+  freely editable or deletable.
 
 ## Files
 
 - `index.html` — page structure and modals
 - `style.css` — styling (light/dark aware)
-- `data.js` — ingredient nutrition database and built-in recipes
-- `app.js` — scaling math, unit conversion, rendering, and custom
-  recipe/ingredient forms
+- `data.js` — seed trips and journal entries
+- `app.js` — state management, rendering, search/filter, and the trip/entry
+  forms (including client-side photo resizing)
 
-## How the math works
+## Data model
 
-Each recipe stores ingredient amounts for its original ("base") serving
-count. Scaling multiplies every ingredient quantity by
-`desiredServings / baseServings`. Each ingredient carries nutrition per
-100g plus gram weights for the units it's used in (e.g. 1 cup of flour =
-120g), so scaled quantities convert to grams and then to
-calories/macros/nutrients, summed across all ingredients.
+Each **trip** has a title, destination, cover emoji, optional start/end
+dates, a summary, free-form notes/insights, and tags. Its status (Happening
+Now / Upcoming / Past / Bucket List) is derived from today's date rather
+than stored, so it stays correct as time passes.
+
+Each **journal entry** belongs to one trip and has a type (blog / story /
+note / insight), title, date, optional location, tagged body text, and a
+list of photos. Entries render in a shared blog-style card used by both the
+per-trip entry list and the global Journal Feed.
