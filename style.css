@@ -326,6 +326,9 @@ textarea { resize: vertical; font-family: var(--font-display); }
 .modal-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 0.4rem; }
 .modal-actions-right { display: flex; gap: 0.6rem; }
 
+.confirm-content { max-width: 420px; }
+.confirm-message { color: var(--ink-soft); line-height: 1.5; margin-bottom: 1rem; }
+
 .emoji-picker { display: flex; gap: 0.4rem; flex-wrap: wrap; }
 .emoji-option {
   font-size: 1.3rem; background: var(--surface); border: 1px solid var(--line);

@@ -391,13 +391,14 @@ function handleDeleteTrip() {
   if (!editingTripId) return;
   const deletedTripId = editingTripId;
   const trip = tripById(deletedTripId);
-  if (!confirm(`Delete "${trip.title}" and all of its journal entries? This can't be undone.`)) return;
-  state.trips = state.trips.filter(t => t.id !== deletedTripId);
-  state.entries = state.entries.filter(e => e.tripId !== deletedTripId);
-  saveState();
-  closeTripModal();
-  if (currentView === "tripDetail" && currentTripId === deletedTripId) closeTripDetail();
-  else rerenderCurrentView();
+  showConfirm(`Delete "${trip.title}" and all of its journal entries? This can't be undone.`, () => {
+    state.trips = state.trips.filter(t => t.id !== deletedTripId);
+    state.entries = state.entries.filter(e => e.tripId !== deletedTripId);
+    saveState();
+    closeTripModal();
+    if (currentView === "tripDetail" && currentTripId === deletedTripId) closeTripDetail();
+    else rerenderCurrentView();
+  });
 }
 
 // ---- Entry modal ----------------------------------------------------------------
@@ -524,12 +525,29 @@ function handleEntryFormSubmit(ev) {
 
 function handleDeleteEntry() {
   if (!editingEntryId) return;
-  if (!confirm("Delete this journal entry? This can't be undone.")) return;
-  state.entries = state.entries.filter(e => e.id !== editingEntryId);
-  saveState();
-  closeEntryModal();
-  rerenderCurrentView();
-  if (currentView === "tripDetail") renderTripDetail();
+  const deletedEntryId = editingEntryId;
+  showConfirm("Delete this journal entry? This can't be undone.", () => {
+    state.entries = state.entries.filter(e => e.id !== deletedEntryId);
+    saveState();
+    closeEntryModal();
+    rerenderCurrentView();
+    if (currentView === "tripDetail") renderTripDetail();
+  });
+}
+
+// ---- Confirm dialog (in-page, not the blocked native confirm()) ---------------------
+
+let confirmCallback = null;
+
+function showConfirm(message, onConfirm) {
+  document.getElementById("confirm-modal-message").textContent = message;
+  confirmCallback = onConfirm;
+  document.getElementById("confirm-modal").classList.remove("hidden");
+}
+
+function closeConfirmModal() {
+  document.getElementById("confirm-modal").classList.add("hidden");
+  confirmCallback = null;
 }
 
 // ---- Lightbox -----------------------------------------------------------------
@@ -577,6 +595,14 @@ function init() {
 
   document.getElementById("lightbox-close").addEventListener("click", closeLightbox);
   document.getElementById("lightbox").addEventListener("click", (ev) => { if (ev.target.id === "lightbox") closeLightbox(); });
+
+  document.getElementById("confirm-cancel-btn").addEventListener("click", closeConfirmModal);
+  document.getElementById("confirm-ok-btn").addEventListener("click", () => {
+    const callback = confirmCallback;
+    closeConfirmModal();
+    if (callback) callback();
+  });
+  document.getElementById("confirm-modal").addEventListener("click", (ev) => { if (ev.target.id === "confirm-modal") closeConfirmModal(); });
 
   [document.getElementById("trip-modal"), document.getElementById("entry-modal")].forEach(modal => {
     modal.addEventListener("click", (ev) => { if (ev.target === modal) modal.classList.add("hidden"); });
